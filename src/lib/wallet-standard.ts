@@ -1,10 +1,15 @@
+import { checkMemoBytes, DEVNET_CHAIN, type DevnetSigningCheck } from "./devnet-memo";
+
 export interface StandardWalletAccount {
   address: string;
+  chains?: readonly string[];
+  features?: readonly string[];
 }
 
 export interface StandardWallet {
   name: string;
   accounts: StandardWalletAccount[];
+  chains?: readonly string[];
   features: Record<string, unknown>;
 }
 
@@ -52,6 +57,30 @@ export async function connectStandardWallet(wallet: StandardWallet): Promise<{ a
 export function supportsWalletMessage(wallet: StandardWallet): boolean {
   const feature = wallet.features["solana:signMessage"] as { signMessage?: unknown } | undefined;
   return typeof feature?.signMessage === "function";
+}
+
+export function supportsDevnetSigning(wallet: StandardWallet, address: string): boolean {
+  const feature = wallet.features["solana:signTransaction"] as { signTransaction?: unknown; supportedTransactionVersions?: readonly unknown[] } | undefined;
+  const account = wallet.accounts.find(item => item.address === address);
+  return typeof feature?.signTransaction === "function" && feature.supportedTransactionVersions?.includes("legacy") === true
+    && wallet.chains?.includes(DEVNET_CHAIN) === true && account?.chains?.includes(DEVNET_CHAIN) === true
+    && account.features?.includes("solana:signTransaction") === true;
+}
+
+export async function signDevnetCheck(wallet: StandardWallet, check: DevnetSigningCheck): Promise<string> {
+  if (!supportsDevnetSigning(wallet, check.address)) throw new Error("This wallet account does not support legacy devnet signing.");
+  if (Date.now() >= Date.parse(check.expiresAt)) throw new Error("The devnet check expired. Prepare it again.");
+  const transaction = Uint8Array.from(atob(check.transaction), char => char.charCodeAt(0));
+  checkMemoBytes(check, transaction, false);
+  const account = wallet.accounts.find(item => item.address === check.address)!;
+  const feature = wallet.features["solana:signTransaction"] as { signTransaction: (input: {
+    account: StandardWalletAccount; transaction: Uint8Array; chain: typeof DEVNET_CHAIN;
+  }) => Promise<{ signedTransaction: Uint8Array }[]> };
+  // Never use solana:signAndSendTransaction or an RPC send method.
+  const outputs = await feature.signTransaction({ account, transaction, chain: DEVNET_CHAIN });
+  if (outputs.length !== 1 || !(outputs[0]?.signedTransaction instanceof Uint8Array)) throw new Error("The wallet did not return one signed transaction.");
+  checkMemoBytes(check, outputs[0].signedTransaction, true);
+  return btoa(String.fromCharCode(...outputs[0].signedTransaction));
 }
 
 /** Explicit nonfinancial signing only; never sign or broadcast a transaction. */

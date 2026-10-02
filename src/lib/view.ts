@@ -92,6 +92,7 @@ export interface PurchaseView {
   walletKind: "none" | "sample" | "read_only" | "connected";
   walletAddress: string | null;
   walletControl: { verifiedAt: string; expiresAt: string } | null;
+  devnetSigning: { verifiedAt: string; chain: "solana:devnet"; broadcast: false } | null;
   signatureCapability: "disabled" | "available" | "unavailable";
   transactionVersion: "legacy" | "v0" | null;
   balanceSource: "none" | "sample" | "chain" | "error";

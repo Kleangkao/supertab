@@ -29,6 +29,8 @@ import {
 import type { ProviderNote, PurchaseView, SessionView } from "./view";
 import { checkoutAccess, readMerchantCheckout, type CheckoutEvidence } from "./merchant-checkout";
 import { createWalletChallenge, verifyWalletChallenge, type WalletChallenge } from "./wallet-proof";
+import { prepareDevnetCheck, verifyDevnetCheck } from "./devnet-signing";
+import type { DevnetSigningCheck } from "./devnet-memo";
 
 export interface ShoppingDependencies {
   config: AppConfig;
@@ -52,6 +54,8 @@ interface SessionRecord {
   walletAddress: string | null;
   walletChallenge: WalletChallenge | null;
   walletProof: { verifiedAt: string; expiresAt: string } | null;
+  devnetCheck: DevnetSigningCheck | null;
+  devnetSigning: { verifiedAt: string; chain: "solana:devnet"; broadcast: false } | null;
   balances: AssetBalance[];
   balanceSource: PurchaseView["balanceSource"];
   balanceError: string | null;
@@ -93,7 +97,7 @@ export class ShoppingService {
   private async completeTurn(current: SessionRecord, text: string): Promise<SessionView> {
     const session: SessionRecord = { ...current, messages: [...current.messages],
       selectedOfferId: null, snapshot: null, plan: null, quote: null, swapApproval: null,
-      checkoutEvidence: null, termsId: crypto.randomUUID(), walletChallenge: null, walletProof: null,
+      checkoutEvidence: null, termsId: crypto.randomUUID(), walletChallenge: null, walletProof: null, devnetCheck: null, devnetSigning: null,
       purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING" };
     this.sessions.set(session.id, session);
     session.messages.push({ role: "user", text });
@@ -180,6 +184,8 @@ export class ShoppingService {
     session.purchaseIntent = null;
     session.walletChallenge = null;
     session.walletProof = null;
+    session.devnetCheck = null;
+    session.devnetSigning = null;
     // A new wallet, product, balance read or explicit refresh needs its own quote.
     session.quote = null;
     session.unsignedTransaction = "not_requested";
@@ -245,6 +251,7 @@ export class ShoppingService {
       throw new Error("Reconnect your wallet and review the current product first.");
     }
     session.walletProof = null;
+    session.devnetCheck = null; session.devnetSigning = null;
     session.walletChallenge = createWalletChallenge({ sessionId, termsId, origin,
       address: session.walletAddress, nowMs: this.nowMs() });
     return session.walletChallenge;
@@ -262,6 +269,37 @@ export class ShoppingService {
       address: session.walletAddress, nowMs: this.nowMs() });
     session.walletProof = { verifiedAt: new Date(this.nowMs()).toISOString(), expiresAt: challenge.expiresAt };
     return this.view(session);
+  }
+
+  async prepareDevnetSigning(sessionId: string, termsId: string, origin: string): Promise<DevnetSigningCheck> {
+    const current = this.requireSession(sessionId);
+    this.requireWalletControl(current, termsId);
+    const session: SessionRecord = { ...current, devnetCheck: null, devnetSigning: null };
+    this.sessions.set(sessionId, session);
+    const check = await prepareDevnetCheck({ address: session.walletAddress!, termsId, origin,
+      now: () => this.nowMs(), fetchImpl: this.deps.fetchImpl });
+    if (this.sessions.get(sessionId) !== session) throw new Error("The wallet review changed while preparing. Prepare a new check.");
+    this.requireWalletControl(session, termsId);
+    session.devnetCheck = check;
+    return check;
+  }
+
+  confirmDevnetSigning(sessionId: string, termsId: string, checkId: string, signedTransaction: string): SessionView {
+    const session = this.requireSession(sessionId);
+    const check = session.devnetCheck;
+    session.devnetCheck = null;
+    this.requireWalletControl(session, termsId);
+    if (!check || check.id !== checkId || check.termsId !== termsId || check.address !== session.walletAddress) throw new Error("This devnet check is no longer current.");
+    verifyDevnetCheck(check, signedTransaction, this.nowMs());
+    session.devnetSigning = { verifiedAt: new Date(this.nowMs()).toISOString(), chain: "solana:devnet", broadcast: false };
+    return this.view(session);
+  }
+
+  private requireWalletControl(session: SessionRecord, termsId: string): void {
+    if (session.walletMode !== "connected" || !session.walletAddress || session.termsId !== termsId
+      || !session.walletProof || this.nowMs() >= Date.parse(session.walletProof.expiresAt)) {
+      throw new Error("Verify control of the connected wallet for this review first.");
+    }
   }
 
   async verifyMerchantTotal(sessionId: string, termsId: string, checkoutId: string): Promise<SessionView> {
@@ -558,6 +596,7 @@ export class ShoppingService {
             : session.walletMode === "address" ? "read_only" : "none",
         walletAddress: session.walletAddress,
         walletControl: session.walletProof && this.nowMs() < Date.parse(session.walletProof.expiresAt) ? session.walletProof : null,
+        devnetSigning: session.devnetSigning,
         signatureCapability: session.signatureCapability,
         transactionVersion: session.transactionVersion,
         balanceSource: session.balanceSource,
@@ -612,6 +651,8 @@ function emptySession(id: string): SessionRecord {
     walletAddress: null,
     walletChallenge: null,
     walletProof: null,
+    devnetCheck: null,
+    devnetSigning: null,
     balances: [],
     balanceSource: "none",
     balanceError: null,

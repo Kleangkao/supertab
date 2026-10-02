@@ -18,33 +18,13 @@ export interface WalletProvider {
   requestSignature(): { status: "disabled"; reason: string };
 }
 
-const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+import { decodeBase58 } from "./base58";
+export { decodeBase58 } from "./base58";
 
 export function isPlausibleAddress(address: string): boolean {
   const trimmed = address.trim();
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed)) return false;
   return decodeBase58(trimmed)?.length === 32;
-}
-
-export function decodeBase58(value: string): Uint8Array | null {
-  let amount = 0n;
-  for (const char of value) {
-    const digit = BASE58.indexOf(char);
-    if (digit < 0) return null;
-    amount = amount * 58n + BigInt(digit);
-  }
-  let hex = amount.toString(16);
-  if (hex.length % 2) hex = `0${hex}`;
-  if (hex === "00") hex = "";
-  const body = hex.length === 0 ? new Uint8Array() : Uint8Array.from(Buffer.from(hex, "hex"));
-  let leadingZeros = 0;
-  for (const char of value) {
-    if (char !== "1") break;
-    leadingZeros += 1;
-  }
-  const decoded = new Uint8Array(leadingZeros + body.length);
-  decoded.set(body, leadingZeros);
-  return decoded;
 }
 
 export function createReadOnlyWallet(options: {

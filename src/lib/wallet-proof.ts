@@ -29,11 +29,15 @@ export function verifyWalletChallenge(challenge: WalletChallenge, input: {
   if (input.challengeId !== challenge.id || input.address !== challenge.address || input.termsId !== challenge.termsId
     || input.nowMs >= Date.parse(challenge.expiresAt)) throw new Error("This wallet check expired or the review changed. Request a new check.");
   if (!/^[A-Za-z0-9+/]{86}==$/.test(input.signature)) throw new Error("The wallet returned an invalid signature.");
-  const bytes = decodeBase58(challenge.address);
+  verifyEd25519(challenge.address, Buffer.from(challenge.message, "utf8"), Buffer.from(input.signature, "base64"));
+}
+
+export function verifyEd25519(address: string, message: Uint8Array, signature: Uint8Array): void {
+  const bytes = decodeBase58(address);
   if (!bytes || bytes.length !== 32) throw new Error("Invalid wallet address.");
   const key = createPublicKey({ format: "der", type: "spki",
     key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(bytes)]) });
-  if (!verify(null, Buffer.from(challenge.message, "utf8"), key, Buffer.from(input.signature, "base64"))) {
+  if (signature.length !== 64 || !verify(null, message, key, signature)) {
     throw new Error("The signature does not prove control of this wallet.");
   }
 }
