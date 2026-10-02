@@ -37,6 +37,7 @@ export async function extractConstraintPatch(input: {
     body: JSON.stringify({
       model: input.model,
       input: promptFor(input.message, input.current, input.history),
+      store: false,
       response_format: {
         type: "text",
         mime_type: "application/json",
@@ -59,20 +60,51 @@ export async function extractConstraintPatch(input: {
 export function extractOutputText(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const record = body as Record<string, unknown>;
-  if (typeof record.output_text === "string") return record.output_text;
-  const outputs = record.outputs ?? record.output;
-  if (typeof outputs === "string") return outputs;
-  if (Array.isArray(outputs)) {
-    for (const part of outputs) {
-      if (typeof part === "string") return part;
-      if (part && typeof part === "object") {
-        const text = (part as { text?: unknown; content?: unknown }).text
-          ?? (part as { content?: { text?: unknown } }).content?.text;
-        if (typeof text === "string") return text;
-      }
+  if (typeof record.output_text === "string" && record.output_text.trim()) return record.output_text;
+  const fromSteps = textFromModelSteps(record.steps);
+  if (fromSteps) return fromSteps;
+  return textFromLegacyOutputs(record.outputs ?? record.output);
+}
+
+function textFromModelSteps(steps: unknown): string | null {
+  if (!Array.isArray(steps)) return null;
+  let text: string | null = null;
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    const typed = step as { type?: unknown; content?: unknown };
+    if (typed.type !== "model_output") continue;
+    const next = joinTextBlocks(typed.content);
+    if (next) text = next;
+  }
+  return text;
+}
+
+function textFromLegacyOutputs(outputs: unknown): string | null {
+  if (typeof outputs === "string" && outputs.trim()) return outputs;
+  if (!Array.isArray(outputs)) return null;
+  const chunks: string[] = [];
+  for (const part of outputs) {
+    if (typeof part === "string") chunks.push(part);
+    else if (part && typeof part === "object") {
+      const text = (part as { text?: unknown }).text;
+      if (typeof text === "string") chunks.push(text);
     }
   }
-  return null;
+  const joined = chunks.join("").trim();
+  return joined.length > 0 ? joined : null;
+}
+
+function joinTextBlocks(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const chunks: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const typed = block as { type?: unknown; text?: unknown };
+    if (typed.type !== "text" || typeof typed.text !== "string") continue;
+    chunks.push(typed.text);
+  }
+  const joined = chunks.join("").trim();
+  return joined.length > 0 ? joined : null;
 }
 
 function promptFor(message: string, current: ShoppingConstraints, history: { role: string; text: string }[]): string {

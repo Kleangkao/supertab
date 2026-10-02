@@ -16,6 +16,7 @@ import { buildHealth } from "../src/lib/health";
 import { readConfig } from "../src/lib/config";
 import { parseTokenAccounts } from "../src/lib/wallet";
 import { JUP_MINT, USDC_MINT, WSOL_MINT, sampleSpendingAssets } from "../src/lib/tokens";
+import { extractOutputText } from "../src/lib/gemini";
 import { ShoppingService } from "../src/lib/shopping";
 import type { AppConfig } from "../src/lib/config";
 
@@ -273,6 +274,63 @@ describe("configuration reporting", () => {
     expect(text).not.toContain(secret);
     expect(text).not.toContain("rpc-secret-value");
     expect(text).not.toContain("dflow-secret-value");
+  });
+});
+
+describe("Gemini interactions", () => {
+  it("reads the current steps reply instead of the removed outputs field", () => {
+    const text = extractOutputText({
+      steps: [
+        { type: "thought", content: [{ type: "text", text: "ignore this" }] },
+        {
+          type: "model_output",
+          content: [{ type: "text", text: "{\"isNewSearch\":false}" }],
+        },
+      ],
+    });
+    expect(text).toBe("{\"isNewSearch\":false}");
+  });
+
+  it("uses a model patch for a follow-up and keeps the shopper's budget", async () => {
+    const service = new ShoppingService({
+      config: readConfig({
+        SHOPIFY_CATALOG_ENABLED: "true",
+        GEMINI_API_KEY: "test-gemini-key",
+        EBAY_CLIENT_ID: "",
+        EBAY_CLIENT_SECRET: "",
+        DFLOW_QUOTE_BASE_URL: "https://dflow.test",
+      }),
+      fetchImpl: (input, init) => {
+        const url = String(input);
+        if (url.includes("generativelanguage.googleapis.com")) {
+          const sent = JSON.parse(String(init?.body)) as { store?: boolean };
+          expect(sent.store).toBe(false);
+          return Promise.resolve(Response.json({
+            steps: [{
+              type: "model_output",
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  isNewSearch: false,
+                  productQuery: "hat",
+                  addColors: ["navy"],
+                  clearMaxPrice: true,
+                  maxPriceCents: 100,
+                }),
+              }],
+            }],
+          }));
+        }
+        return mockFetch(input);
+      },
+    });
+    const first = await service.converse(null, "Find me a black polo under $50.");
+    const second = await service.converse(first.sessionId, "Navy is fine too.");
+    expect(second.gemini).toBe("used");
+    expect(second.constraintsLabel).toContain("polo");
+    expect(second.constraintsLabel).toContain("navy");
+    expect(second.constraintsLabel).toContain("$50.00");
+    expect(second.constraintsLabel).not.toContain("hat");
   });
 });
 

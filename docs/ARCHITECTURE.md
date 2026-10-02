@@ -6,7 +6,7 @@ SuperTab is one Next.js application. The browser talks to route handlers. Those 
 
 `ShoppingService` keeps a short-lived session: conversation, constraints, offers, the selected product, and the funding quote.
 
-`resolveConstraints` merges a shopper message into the current constraints. Gemini, when `GEMINI_API_KEY` is set, may propose a patch through the Interactions API and `gemini-3.5-flash-lite`. The application still applies the shopper's explicit budget, color, size, and product words. Gemini is not allowed to invent prices or listings.
+`resolveConstraints` merges a shopper message into the current constraints. Gemini, when `GEMINI_API_KEY` is set, may propose a patch through the Interactions API and `gemini-3.5-flash-lite`. The raw reply is read from the `steps` timeline. The application still applies the shopper's explicit budget, color, size, and product words. Gemini is not allowed to invent prices or listings. The request sets `store` to false.
 
 `searchShopify` and `searchEbay` implement the same search result shape. Shopify calls the public Global Catalog MCP endpoint `https://catalog.shopify.com/api/ucp/mcp`. eBay calls the Browse API with an application token and stays disabled until both client credentials exist. A timeout or outage on one provider does not stop the other.
 
