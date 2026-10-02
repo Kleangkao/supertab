@@ -15,7 +15,7 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - Quote expiry countdown, refresh without losing the selected product, and browser refresh recovery while the server session remains available.
 - A purchase review that keeps payment and merchant order separate.
 - An honest "provider not connected" card rail.
-- A separate local payment rehearsal with explicit approval, authorization, decline, capture, independent simulated order evidence, and refund. It makes no provider calls and uses a fixed $48 fixture rather than the selected product or wallet.
+- A local payment rehearsal for the selected product with explicit approval, authorization, decline, capture, independent simulated order evidence, and refund. It uses the listed item amount plus clearly invented $5 shipping and $3 tax fixtures, makes no provider calls, and never uses wallet funds.
 
 Catalog and listing prices are not merchant checkout totals. Shipping and tax stay unknown unless a provider returns them.
 
@@ -35,7 +35,9 @@ Purchase approval additionally requires a verified final merchant checkout total
 4. Review the planning amount, actual USDC, funding gap, and live DFlow quote. A fundable real-wallet plan prepares an unsigned transaction and reaches `AWAITING_SWAP_APPROVAL`. No approval is recorded automatically.
 5. If the countdown expires, choose **Refresh funding quote**. Product and wallet context stay in place.
 6. Point out the future CardRail and the explicit payment/order statuses. Bridge sandbox access is blocked, no card exists, and merchant order creation is not implemented.
-7. Optionally use **Try the payment journey** to rehearse the lifecycle locally. Approve the simulated $48 purchase, authorize, then capture. The order remains uncreated until you add the simulated receipt. A refund preserves the recorded order history. This is local simulation, not Bridge sandbox verification; resetting or refreshing clears it.
+7. Optionally use **Try the payment journey** to rehearse the selected product's lifecycle locally. Its simulated amount includes invented shipping and tax, not merchant-verified fees. Approve that simulated amount, authorize, then capture. The order remains uncreated until you add the simulated receipt. A refund preserves the recorded order history. This is local simulation, not Bridge sandbox verification; resetting, refreshing or changing product terms clears it.
+
+See [the demo script and capability matrix](docs/DEMO.md) for a concise presentation with honest boundaries.
 
 Balances and prices change. During the October 2, 2026 verification, the demo wallet held about 0.057 SOL and 0.000004 USDC. After reserving 0.01 SOL, DFlow quoted about 5.73 USDC of funding capacity. The $27 polo was correctly insufficient; following up with “Under $5 please.” found a real $4 Shopify polo that reached unsigned preparation. Do not imply a more expensive item is fundable or top up this wallet as part of automated demo work.
 
