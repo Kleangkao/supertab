@@ -25,6 +25,8 @@ The purchase review links to the provider's merchant cart or product page when a
 
 SuperTab will not swap, sign, broadcast, issue a card, or pay a merchant. The interface stops at awaiting user approval and exposes no execution button. Existing approval endpoints record intent only.
 
+Purchase approval additionally requires a verified final merchant checkout total. A catalog or listing planning amount is rejected with HTTP 403 rather than recorded as an approved purchase. Payment readiness requires final-total knowledge, current approval, real on-chain USDC coverage and a ready rail; a live conversion quote or sample balance cannot substitute for funds already available.
+
 ## Presenter flow
 
 1. Ask “Find me a black polo under $50.”

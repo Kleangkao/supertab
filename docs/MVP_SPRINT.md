@@ -32,6 +32,12 @@ Added an HTTPS merchant-review link to the selected product's cart or product pa
 
 The real merchant link reached True Classic checkout for the exact selected size/quantity. Read-only WebMCP returned an incomplete checkout with matching item amount but missing contact/delivery details and fulfillment groups. This is stronger evidence of the remaining total gap and reveals a browser-backed read path distinct from server API authentication. The browser without a wallet extension correctly showed the read-only fallback, without pretending to connect.
 
+### Final-total approval and payment readiness cycle
+
+A fresh-session regression proved that approvePurchase previously marked a catalog planning amount approved while finalTotal was unknown. Approval now rejects that case with PurchaseApprovalError (HTTP 403). Payment readiness additionally checks final-total knowledge and real chain USDC coverage; quoted conversion output and sample funds do not count as funds ready. Purchase intents accept the selected adapter's provider ID instead of hard-coding Bridge. The local simulation remains independent and continues to exercise approval and lifecycle states.
+
+46 deterministic tests, typecheck, lint and production build pass. A real HTTP search/review returned finalTotal unknown, purchaseApproval required and PAYMENT_NOT_READY; posting the intent endpoint returned HTTP 403 with the final-total explanation. This closes an invariant violation, not the checkout integration gap. Financial execution is still disabled.
+
 1. Merchant checkout evidence: investigate legitimate provider access, attach an amount to the selected merchant/product/variant/quantity and freshness, and invalidate approval when terms change. Catalog data or a manually entered amount must never claim a verified final total.
 2. Wallet connection reliability: exercise Wallet Standard discovery, account changes, disconnection and refresh. Keep signing disabled and account permissions distinct from purchase approval.
 3. Payment lifecycle integration: provider-neutral event handling, duplicate/out-of-order protection, independent order evidence, then real sandbox evidence if access becomes available. Avoid prolonged onboarding attempts.

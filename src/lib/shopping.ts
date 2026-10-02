@@ -8,7 +8,7 @@ import { classifyOffers } from "./filter-offers";
 import { transitionPurchase, type PurchaseState } from "./purchase";
 import { BridgeCardRail } from "./bridge-rail";
 import type { PaymentRailStatus } from "./card-rail";
-import { createPurchaseIntent, type PurchaseIntent } from "./purchase-intent";
+import { createPurchaseIntent, PurchaseApprovalError, PURCHASE_APPROVAL_TTL_MS, type PurchaseIntent } from "./purchase-intent";
 import { paymentStateFor, type OrderState } from "./payment-lifecycle";
 import { searchShopify } from "./shopify";
 import { extractConstraintPatch, GeminiBusyError } from "./gemini";
@@ -234,7 +234,10 @@ export class ShoppingService {
   async approvePurchase(sessionId: string): Promise<SessionView> {
     const session = this.requireSession(sessionId);
     const offer = this.selectedOffer(session);
-    const amount = session.snapshot ? knownPlanningMinor(session.snapshot) : null;
+    if (!session.snapshot?.merchantTotalKnown || session.snapshot.merchantTotalMinor == null) {
+      throw new PurchaseApprovalError("The final merchant checkout total must be verified before approving this purchase. A planning amount is not a final checkout total.");
+    }
+    const amount = session.snapshot.merchantTotalMinor;
     if (!offer || amount == null) throw new Error("There is no reviewed amount to approve.");
     const now = this.nowMs();
     session.purchaseIntent = createPurchaseIntent({
@@ -248,8 +251,9 @@ export class ShoppingService {
       maximumAuthorizedAmountMinor: amount,
       currency: session.snapshot?.currency ?? "USD",
       approvedAtMs: now,
-      expiresAtMs: now + 15 * 60 * 1000,
+      expiresAtMs: now + PURCHASE_APPROVAL_TTL_MS,
       fundingPlanReference: session.plan ? `funding:${amount.toString()}` : null,
+      cardRailProvider: this.rail.id,
     });
     return this.view(session);
   }
@@ -484,6 +488,8 @@ export class ShoppingService {
         purchaseApproval: approvalLabel(session.purchaseIntent, this.nowMs()),
         paymentStatus: paymentStateFor({
           hasOffer: true,
+          finalTotalKnown: session.snapshot.merchantTotalKnown,
+          fundsReady: session.balanceSource === "chain" && session.plan?.readiness === "covered_by_usdc",
           approved: session.purchaseIntent != null,
           expired: session.purchaseIntent != null && this.nowMs() >= Date.parse(session.purchaseIntent.expiresAt),
           railReady: rail.availability === "ready" && rail.spendingAvailable,

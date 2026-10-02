@@ -12,7 +12,7 @@ export interface PurchaseIntent {
   approvedAt: string;
   expiresAt: string;
   fundingPlanReference: string | null;
-  cardRailProvider: "bridge";
+  cardRailProvider: string | null;
 }
 
 export class PurchaseApprovalError extends Error {
@@ -35,6 +35,7 @@ export function createPurchaseIntent(input: {
   approvedAtMs: number;
   expiresAtMs: number;
   fundingPlanReference: string | null;
+  cardRailProvider?: string | null;
 }): PurchaseIntent {
   if (!input.explicitApproval) {
     throw new PurchaseApprovalError("This purchase has not been approved. A connected wallet is not approval.");
@@ -60,7 +61,7 @@ export function createPurchaseIntent(input: {
     approvedAt: new Date(input.approvedAtMs).toISOString(),
     expiresAt: new Date(input.expiresAtMs).toISOString(),
     fundingPlanReference: input.fundingPlanReference,
-    cardRailProvider: "bridge",
+    cardRailProvider: input.cardRailProvider ?? null,
   };
 }
 

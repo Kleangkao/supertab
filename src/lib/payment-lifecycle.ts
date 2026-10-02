@@ -24,13 +24,15 @@ export type OrderState = (typeof ORDER_STATES)[number];
 
 export function paymentStateFor(input: {
   hasOffer: boolean;
+  finalTotalKnown: boolean;
+  fundsReady: boolean;
   approved: boolean;
   expired: boolean;
   railReady: boolean;
 }): PaymentState {
-  if (!input.hasOffer) return "PAYMENT_NOT_READY";
+  if (!input.hasOffer || !input.finalTotalKnown) return "PAYMENT_NOT_READY";
   if (!input.approved || input.expired) return "PAYMENT_APPROVAL_REQUIRED";
-  if (!input.railReady) return "PAYMENT_NOT_READY";
+  if (!input.railReady || !input.fundsReady) return "PAYMENT_NOT_READY";
   return "PAYMENT_READY";
 }
 

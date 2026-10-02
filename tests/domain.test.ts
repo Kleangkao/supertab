@@ -529,7 +529,7 @@ describe("shopping flow", () => {
     expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
     expect(approved.purchase?.orderStatus).toBe("ORDER_NOT_CREATED");
-    expect(approved.purchase?.paymentStatus).toBe("PAYMENT_APPROVAL_REQUIRED");
+    expect(approved.purchase?.paymentStatus).toBe("PAYMENT_NOT_READY");
     expect(approved.purchase?.unsignedTransaction).toBe("not_requested");
     expect(approved.purchase?.finalTotal).toBe("unknown");
   });
@@ -558,6 +558,15 @@ describe("shopping flow", () => {
 });
 
 describe("purchase approval and Bridge card events", () => {
+  it("does not approve a catalog planning amount as a final merchant purchase", async () => {
+    const service = new ShoppingService({ config: testConfig(), fetchImpl: mockFetch });
+    const search = await service.converse(null, "Black running shoes size 42 under $120");
+    const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "none" });
+    expect(review.purchase?.finalTotal).toBe("unknown");
+    await expect(service.approvePurchase(search.sessionId)).rejects.toThrow(/final.*checkout total/i);
+    expect(service.getSession(search.sessionId).purchase?.purchaseApproval).toBe("required");
+  });
+
   it("requires an explicit purchase approval and rejects an expired or larger amount", () => {
     expect(() => createPurchaseIntent({
       explicitApproval: false,
@@ -587,7 +596,7 @@ describe("purchase approval and Bridge card events", () => {
       expiresAtMs: 61_000,
       fundingPlanReference: "funding:4800",
     });
-    expect(intent.cardRailProvider).toBe("bridge");
+    expect(intent.cardRailProvider).toBeNull();
     assertPurchasePayable(intent, 4800n, 2_000);
     expect(() => assertPurchasePayable(null, 4800n, 2_000)).toThrow(/wallet allowance/i);
     expect(() => assertPurchasePayable(intent, 4801n, 2_000)).toThrow(/ceiling/i);
