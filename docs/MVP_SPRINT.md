@@ -12,6 +12,10 @@ The existing app stays in place. Financial execution remains disabled under AGEN
 
 ## Capability boundaries
 
+## Wallet funding correction
+
+A second red/green regression reproduces two canonical USDC accounts ($5 and $7) incorrectly funding a $10 planning amount from the first account only. The wallet reader now aggregates all accounts by mint before planning, quoting or display; conflicting decimals fail the balance read instead of combining incompatible units. The suite now has 40 deterministic passing tests (three opt-in live checks remain skipped).
+
 Real discovery and provider-backed wallet/quote reads remain available in the implementation. This cycle verified real Shopify discovery in the browser, not wallet signing, live payment or a merchant order. Local rehearsal never changes the shopping session's approval, funding, payment or order status and never calls Bridge or Stripe. It is not provider sandbox proof.
 
 ## Next priorities and verifiable outcomes

@@ -125,8 +125,19 @@ export async function readSolanaBalances(
     ...parseTokenAccounts(tokenAccounts?.value ?? []),
     ...parseTokenAccounts(token2022?.value ?? []),
   ];
-  let sawUsdc = false;
+  // One mint can have multiple token accounts. Return one asset per mint so
+  // funding, quote selection and the UI all use the complete wallet balance.
+  const byMint = new Map<string, AssetBalance>();
   for (const account of parsed) {
+    const previous = byMint.get(account.mint);
+    if (previous && previous.decimals !== account.decimals) {
+      throw new Error("Solana returned inconsistent decimals for a token mint.");
+    }
+    if (previous) previous.amount += account.amount;
+    else byMint.set(account.mint, { ...account });
+  }
+  let sawUsdc = false;
+  for (const account of byMint.values()) {
     if (account.amount === 0n && !isUsdcMint(account.mint)) continue;
     if (isUsdcMint(account.mint)) sawUsdc = true;
     assets.push(account);
