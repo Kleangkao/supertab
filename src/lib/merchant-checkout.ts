@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config";
 import { merchantReviewUrl, payableFromOffer, type NormalizedOffer, type PayableSnapshot } from "./offers";
+import { publicBuyerIp } from "./buyer-context";
 
 // get_checkout only. Never create, update or complete a merchant checkout here.
 // https://shopify.dev/docs/agents/carts-and-checkout/checkout-mcp
@@ -23,15 +24,18 @@ export function checkoutAccess(offer: NormalizedOffer, config: AppConfig): { ava
   if (!(config.shopifyCheckoutToken || (config.shopifyClientId && config.shopifyClientSecret)) || !origin || !config.shopifyCheckoutOrigins.includes(origin)) {
     return { available: false, message: "Final-total verification needs merchant checkout access. Review shipping and tax at the merchant; SuperTab still uses a planning amount." };
   }
-  return { available: true, message: "An authorized merchant checkout can be read. Only a current, ready checkout for this exact product and quantity can verify the final total." };
+  return { available: true, message: "Checkout reading is configured. The merchant must accept authentication and buyer context. Only a current, ready checkout for this exact product and quantity can verify the final total." };
 }
 
 export async function readMerchantCheckout(input: {
   offer: NormalizedOffer; quantity: number; checkoutId: string; config: AppConfig;
   nowMs: number; fetchImpl?: typeof fetch;
+  buyerIp?: string | null;
 }): Promise<CheckoutEvidence> {
   const access = checkoutAccess(input.offer, input.config);
   if (!access.available) throw new Error(access.message);
+  const buyerIp = publicBuyerIp(input.buyerIp);
+  if (!buyerIp) throw new Error("Merchant checkout reading needs trusted buyer network context. Configure it for this local PC or a trusted deployment proxy. Your final total remains unverified.");
   if (!input.checkoutId.startsWith("gid://shopify/Checkout/") || input.checkoutId.length > 2048 || /[\r\n]/.test(input.checkoutId)) {
     throw new Error("Enter the merchant-provided Shopify checkout ID. A cart ID or product URL is not a final checkout.");
   }
@@ -44,7 +48,7 @@ export async function readMerchantCheckout(input: {
     response = await (input.fetchImpl ?? fetch)(`${origin}/api/ucp/mcp`, {
       method: "POST", redirect: "error", cache: "no-store",
       headers: { "Content-Type": "application/json", accept: "application/json, text/event-stream",
-        authorization: `Bearer ${token}` },
+        authorization: `Bearer ${token}`, "Shopify-Buyer-IP": buyerIp },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
         name: "get_checkout", arguments: { id: input.checkoutId,
           meta: { "ucp-agent": { profile: input.config.shopifyProfile } } },

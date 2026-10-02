@@ -14,7 +14,8 @@ const product = { id: "polo", title: "Black polo", variants: [{
   checkout_url: "https://merchant.test/cart/1:1", options: [{ name: "Size", label: "S" }],
 }] };
 const [offer] = normalizeShopifyProducts([product], new Date(NOW).toISOString());
-const context = { offer: offer!, quantity: 1, checkoutId, merchantOrigin: "https://merchant.test", nowMs: NOW };
+const BUYER_IP = "8.8.8.8"; // Fixture only; no request reaches a real merchant.
+const context = { offer: offer!, quantity: 1, checkoutId, merchantOrigin: "https://merchant.test", nowMs: NOW, buyerIp: BUYER_IP };
 const config = readConfig({ SHOPIFY_CHECKOUT_ACCESS_TOKEN: "TEST_ONLY_TOKEN", SHOPIFY_CHECKOUT_ALLOWED_ORIGINS: "https://merchant.test" });
 function checkout() {
   return { id: checkoutId, status: "ready_for_complete", currency: "USD", expires_at: new Date(NOW + 3_600_000).toISOString(),
@@ -69,15 +70,18 @@ describe("authenticated merchant checkout evidence", () => {
 
   it("only sends credentials to an allowed merchant and invokes get_checkout", async () => {
     const calls: string[] = [];
+    let forwardedBuyerIp: string | null = null;
     const evidence = await readMerchantCheckout({ ...context, config, fetchImpl: async (url, init) => {
       calls.push(String(url));
       expect(init?.redirect).toBe("error"); expect(init?.cache).toBe("no-store");
+      forwardedBuyerIp = new Headers(init?.headers).get("shopify-buyer-ip");
       const request = JSON.parse(String(init?.body));
       expect(request.params.name).toBe("get_checkout");
       expect(request.params.arguments.id).toBe(checkoutId);
       return Response.json({ result: { structuredContent: checkout() } });
     } });
     expect(evidence.snapshot.merchantTotalKnown).toBe(true);
+    expect(forwardedBuyerIp).toBe(BUYER_IP);
     expect(calls).toEqual(["https://merchant.test/api/ucp/mcp"]);
     let fetched = false;
     await expect(readMerchantCheckout({ ...context, config: { ...config, shopifyCheckoutOrigins: [] },
@@ -98,6 +102,14 @@ describe("authenticated merchant checkout evidence", () => {
     });
     expect(calls).toEqual(["https://api.shopify.com/auth/access_token", "https://merchant.test/api/ucp/mcp"]);
     expect(Object.keys(evidence)).not.toContain("access_token");
+  });
+
+  it("refuses missing or invalid buyer context before any credential request", async () => {
+    let calls = 0;
+    for (const buyerIp of [null, "127.0.0.1", "8.8.8.8, 1.1.1.1", "8.8.8.8\r\nInjected: x"]) {
+      await expect(readMerchantCheckout({ ...context, buyerIp, config, fetchImpl: async () => { calls++; return Response.json({}); } })).rejects.toThrow(/buyer network context/);
+    }
+    expect(calls).toBe(0);
   });
 });
 
@@ -125,7 +137,7 @@ describe("checkout, funding and approval integration", () => {
     const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id,
       walletMode: "address", address: "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg" });
     expect(review.purchase?.funding?.planningDisplay).toBe("$10.00");
-    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId);
+    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId, BUYER_IP);
     expect(verified.purchase).toMatchObject({ finalTotal: "verified", amountKind: "merchant_checkout_total",
       checkout: { merchantTotalDisplay: "$17.50" }, funding: { planningDisplay: "$17.50", merchantTotalKnown: true } });
     await expect(service.approvePurchase(search.sessionId, review.purchase!.termsId)).rejects.toThrow(/terms changed/);
@@ -145,10 +157,10 @@ describe("checkout, funding and approval integration", () => {
     const { service, change } = setup();
     const search = await service.converse(null, "Find me a black polo under $50");
     const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "none" });
-    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId);
+    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId, BUYER_IP);
     await service.approvePurchase(search.sessionId, verified.purchase!.termsId);
     change({ ...checkout(), status: "incomplete" });
-    await expect(service.verifyMerchantTotal(search.sessionId, verified.purchase!.termsId, checkoutId)).rejects.toThrow(/not ready/);
+    await expect(service.verifyMerchantTotal(search.sessionId, verified.purchase!.termsId, checkoutId, BUYER_IP)).rejects.toThrow(/not ready/);
     expect(service.getSession(search.sessionId).purchase).toMatchObject({ finalTotal: "unknown", purchaseApproval: "required", swapApproval: null });
   });
 
@@ -157,7 +169,7 @@ describe("checkout, funding and approval integration", () => {
     const search = await service.converse(null, "Find me a black polo under $50");
     const selection = { sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "none" as const };
     const review = await service.review(selection);
-    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId);
+    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId, BUYER_IP);
     await service.approvePurchase(search.sessionId, verified.purchase!.termsId);
     const refresh = await service.review(selection);
     expect(refresh.purchase).toMatchObject({ finalTotal: "verified", purchaseApproval: "required" });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readConfig, type AppConfig } from "./config";
 import { buildSearchQuery, describeConstraints, emptyConstraints, resolveConstraints, type ConstraintPatch, type ShoppingConstraints } from "./constraints";
 import { bindQuote, fetchPreparedTransaction, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
@@ -302,7 +303,7 @@ export class ShoppingService {
     }
   }
 
-  async verifyMerchantTotal(sessionId: string, termsId: string, checkoutId: string): Promise<SessionView> {
+  async verifyMerchantTotal(sessionId: string, termsId: string, checkoutId: string, buyerIp?: string | null): Promise<SessionView> {
     const current = this.requireSession(sessionId);
     const offer = this.selectedOffer(current);
     if (!offer || current.termsId !== termsId) throw new PurchaseApprovalError("Your selection changed. Review the current product before verifying its checkout.");
@@ -312,7 +313,7 @@ export class ShoppingService {
       purchaseIntent: null, swapApproval: null, quote: null, plan: null,
       unsignedTransaction: "not_requested", transactionVersion: null, termsId: crypto.randomUUID(), state: "CHECKOUT_READY" };
     this.sessions.set(sessionId, session);
-    const evidence = await readMerchantCheckout({ offer, quantity: session.quantity, checkoutId,
+    const evidence = await readMerchantCheckout({ offer, quantity: session.quantity, checkoutId, buyerIp,
       config: this.deps.config, fetchImpl: this.deps.fetchImpl, nowMs: this.nowMs() });
     if (this.sessions.get(sessionId) !== session) return this.view(this.requireSession(sessionId));
     if (evidence.expiresAtMs <= this.nowMs()) throw new Error("This checkout expired while it was being read. Verify a current checkout.");
@@ -703,19 +704,8 @@ function assistantCopy(input: {
 const globalStore = globalThis as { __supertab?: ShoppingService; __supertabStamp?: string };
 
 export function configStamp(config: AppConfig): string {
-  return [
-    config.geminiApiKey ? "gemini" : "",
-    config.ebayClientId && config.ebayClientSecret ? "ebay" : "",
-    config.shopifyEnabled ? "shopify" : "",
-    config.dflowApiKey ? "dflow" : "",
-    config.solanaRpcCustom ? "rpc" : "",
-    config.geminiModel,
-    config.bridgeApiKey ? "bridge" : "",
-    config.dflowBaseUrl,
-    config.ebayEnvironment,
-    config.shopifyCheckoutToken || (config.shopifyClientId && config.shopifyClientSecret) ? "checkout" : "",
-    config.shopifyCheckoutOrigins.join(","),
-  ].join("|");
+  // Refresh on actual configuration changes without exposing credentials or IPs.
+  return createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
 export function getShoppingService(): ShoppingService {

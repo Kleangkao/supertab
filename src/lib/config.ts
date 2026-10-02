@@ -9,6 +9,8 @@ export interface AppConfig {
   shopifyClientId: string | null;
   shopifyClientSecret: string | null;
   shopifyCheckoutOrigins: string[];
+  shopifyLocalBuyerIp: string | null;
+  shopifyBuyerIpHeader: string | null;
   ebayClientId: string | null;
   ebayClientSecret: string | null;
   ebayEnvironment: "production" | "sandbox";
@@ -41,6 +43,9 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     shopifyCheckoutToken: blankToNull(env.SHOPIFY_CHECKOUT_ACCESS_TOKEN),
     shopifyClientId: blankToNull(env.SHOPIFY_CLIENT_ID),
     shopifyClientSecret: blankToNull(env.SHOPIFY_CLIENT_SECRET),
+    shopifyLocalBuyerIp: blankToNull(env.SHOPIFY_LOCAL_BUYER_IP),
+    shopifyBuyerIpHeader: ["x-forwarded-for", "x-real-ip", "x-vercel-forwarded-for"].includes(env.SHOPIFY_TRUSTED_BUYER_IP_HEADER ?? "")
+      ? env.SHOPIFY_TRUSTED_BUYER_IP_HEADER! : null,
     shopifyCheckoutOrigins: (env.SHOPIFY_CHECKOUT_ALLOWED_ORIGINS ?? "").split(",").map(value => value.trim()).filter(value => {
       try { const url = new URL(value); return url.protocol === "https:" && url.origin === value && !url.username && !url.password; }
       catch { return false; }

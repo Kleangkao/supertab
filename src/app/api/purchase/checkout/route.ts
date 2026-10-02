@@ -1,4 +1,6 @@
 import { getShoppingService } from "@/lib/shopping";
+import { buyerIpForRequest } from "@/lib/buyer-context";
+import { readConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +13,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Select a product and provide its merchant checkout ID." }, { status: 400 });
     }
     sessionId = body.sessionId;
-    return Response.json(await getShoppingService().verifyMerchantTotal(body.sessionId, body.termsId, body.checkoutId), {
+    return Response.json(await getShoppingService().verifyMerchantTotal(body.sessionId, body.termsId, body.checkoutId,
+      buyerIpForRequest(request, readConfig())), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

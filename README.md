@@ -81,8 +81,12 @@ Open http://localhost:3000.
 | `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` | Optional Catalog credentials for authenticated merchant checkout reads. A token is obtained server-side at request time. |
 | `SHOPIFY_CHECKOUT_ACCESS_TOKEN` | Optional existing token instead of client credentials. Never exposed to the browser. |
 | `SHOPIFY_CHECKOUT_ALLOWED_ORIGINS` | Comma-separated HTTPS merchant origins approved to receive the checkout token, without paths. Empty disables checkout reads. |
+| `SHOPIFY_LOCAL_BUYER_IP` | Actual public buyer IP for this single-user PC. Used only for same-origin localhost checkout reads; refresh it if your network address changes. |
+| `SHOPIFY_TRUSTED_BUYER_IP_HEADER` | Hosted deployments only: one supported IP header overwritten by a trusted proxy. Forwarded address lists are rejected. |
 
 `GET /api/health` reports configured, not configured, available, unavailable, or not connected. It never returns secret values.
+
+On this PC, the repository is in `F:\James\codex project file\SuperTab\supertab-main`. Run commands from that directory. Existing Shopify and eBay credentials were restored from the local agenttab configuration; DFlow and Solana RPC configuration came from Artportal. Gemini and Bridge credentials were not found in the supplied project folders. `.env.local` remains ignored by Git. Shopify bearer-token checkout reads also require the buyer IP header; this is private server request context, not a session or model field. Configured credentials alone do not prove that a merchant checkout is ready or that payment access is available.
 
 For merchant checkout verification, select the exact product and quantity, open **Read an existing merchant checkout**, and provide the merchant integration's checkout reference. SuperTab calls only `get_checkout`; it does not create, update, or complete that checkout. A cart reference, incomplete checkout, extra items, mismatched variant/quantity, inconsistent monetary breakdown or expired checkout is rejected. Access depends on Shopify and merchant permissions; Catalog authentication alone does not prove those permissions. The current input is an integration aid and still needs a smoother merchant handoff before a consumer launch.
 
