@@ -48,3 +48,16 @@ export async function connectStandardWallet(wallet: StandardWallet): Promise<{ a
     canRequestSignature: "solana:signTransaction" in wallet.features,
   };
 }
+
+/** Account, chain or capability changes invalidate the reviewed wallet terms. */
+export function watchStandardWallet(wallet: StandardWallet, invalidate: () => void): () => void {
+  const feature = wallet.features["standard:events"] as {
+    on?: (event: "change", callback: (change: Record<string, unknown>) => void) => () => void;
+  } | undefined;
+  if (!feature?.on) return () => {};
+  let active = true;
+  const off = feature.on("change", change => {
+    if (active && ["accounts", "chains", "features"].some(key => Object.hasOwn(change, key))) invalidate();
+  });
+  return () => { if (!active) return; active = false; off(); };
+}

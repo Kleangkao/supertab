@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
-import { connectStandardWallet, discoverStandardWallets, type StandardWallet } from "@/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, watchStandardWallet, type StandardWallet } from "@/lib/wallet-standard";
+import { clearWalletReview } from "@/lib/wallet-review";
 import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
 
 // An explicit convenience for this demo session, never an application wallet default.
@@ -25,6 +26,10 @@ export function ShopApp() {
   const [walletChoices, setWalletChoices] = useState<StandardWallet[]>([]);
   const [now, setNow] = useState(0);
   const lock = useRef(false);
+  const walletEpoch = useRef(0);
+  const walletOff = useRef<(() => void) | null>(null);
+  const latestSession = useRef<SessionView | null>(null);
+  const pendingWalletReset = useRef<{ sessionId: string; offerId: string } | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const selectedOfferId = session?.selectedOfferId;
   useEffect(() => {
@@ -49,6 +54,7 @@ export function ShopApp() {
         if (restored.purchase?.walletMode === "connected") {
           restored.purchase = { ...restored.purchase, walletMode: "address", walletKind: "read_only", signatureCapability: "disabled" };
         }
+        latestSession.current = restored;
         setSession(restored);
         setWalletMode(restored.purchase?.walletMode === "connected" ? "address" : restored.purchase?.walletMode ?? "none");
         setAddress(restored.purchase?.walletAddress ?? "");
@@ -58,22 +64,48 @@ export function ShopApp() {
         if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Could not restore your search.");
       }).finally(() => { if (!controller.signal.aborted) { lock.current = false; setBusy(null); } });
     }
-    return () => { controller.abort(); window.clearInterval(timer); };
+    return () => { controller.abort(); window.clearInterval(timer); walletOff.current?.(); };
   }, []);
 
   async function request(path: string, payload: object, loading: string) {
     if (lock.current) return;
+    const epoch = walletEpoch.current;
     lock.current = true; setBusy(loading); setError(null);
     try {
       const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
       const body = await response.json() as SessionView & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Please try again.");
+      if (epoch !== walletEpoch.current) return;
+      latestSession.current = body;
       setSession(body); setNow(currentTime());
       try { sessionStorage.setItem(STORAGE_KEY, body.sessionId); } catch { /* Storage is optional. */ }
       return body;
     } catch (caught) {
+      if (epoch !== walletEpoch.current) return;
       setError(caught instanceof Error && caught.name !== "TimeoutError" ? caught.message : "This is taking too long. Your selection is still here; please try again.");
-    } finally { lock.current = false; setBusy(null); }
+    } finally { lock.current = false; setBusy(null); flushWalletReset(); }
+  }
+
+  function flushWalletReset() {
+    if (lock.current || !pendingWalletReset.current) return;
+    const reset = pendingWalletReset.current;
+    pendingWalletReset.current = null;
+    void request("/api/purchase", { ...reset, walletMode: "none" }, "Clearing the previous wallet’s funding plan…");
+  }
+
+  function invalidateWallet() {
+    walletOff.current?.(); walletOff.current = null;
+    walletEpoch.current++;
+    setWalletMode("none"); setAddress(""); setFundingMint(null);
+    const current = latestSession.current;
+    if (current) {
+      latestSession.current = clearWalletReview(current);
+      setSession(latestSession.current);
+      if (current.selectedOfferId) pendingWalletReset.current = { sessionId: current.sessionId, offerId: current.selectedOfferId };
+    }
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Storage is optional. */ }
+    setError("Your wallet accounts or network changed. Reconnect to review a fresh funding plan.");
+    flushWalletReset();
   }
 
   async function search(event: FormEvent) {
@@ -85,6 +117,7 @@ export function ShopApp() {
 
   async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable = false) {
     if (!session) return;
+    if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; }
     const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
     if (body) {
       setWalletMode(mode); setAddress(nextAddress); setFundingMint(mint);
@@ -102,10 +135,14 @@ export function ShopApp() {
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
+      walletOff.current?.();
+      const epoch = walletEpoch.current;
+      walletOff.current = watchStandardWallet(wallet, invalidateWallet);
       lock.current = false;
+      if (epoch !== walletEpoch.current) return;
       if (session?.selectedOfferId) await selectOffer(session.selectedOfferId, "connected", connected.address, null, connected.canRequestSignature);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
-    finally { lock.current = false; setBusy(null); }
+    finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
   const purchase = session?.purchase;
@@ -148,6 +185,7 @@ export function ShopApp() {
           {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}
           <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
           {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
+          {purchase.walletKind !== "none" && <button className="secondary" disabled={!!busy} onClick={invalidateWallet}>Clear wallet review</button>}
           {purchase.walletKind === "sample" && <p className="sample-note">Illustrative balances, not your assets. No transaction is prepared for a sample wallet.</p>}
           {purchase.balanceError && <p className="inline-error" role="alert">We couldn’t read this wallet. {purchase.balanceError}</p>}
           {purchase.assets.length > 0 && <div className="assets">{purchase.assets.filter(asset => asset.isUsdc || asset.kind === "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? "Token"} value={asset.amountDisplay} />)}{purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <details className="review-details"><summary>Other tokens in this wallet</summary>{purchase.assets.filter(asset => !asset.isUsdc && asset.kind !== "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? maskAddress(asset.mint)} value={asset.amountDisplay} />)}<p>Unrecognized tokens are shown by mint address. They have no assumed dollar value or guaranteed conversion route.</p></details>}</div>}

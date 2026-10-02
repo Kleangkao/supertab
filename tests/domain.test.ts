@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { clearWalletReview } from "../src/lib/wallet-review";
 import { describe, expect, it } from "vitest";
 import { mapBridgeCardEvent, verifyIssuingWebhook } from "../src/lib/bridge-events";
 import { BridgeCardRail, describeSolanaFundingBinding } from "../src/lib/bridge-rail";
@@ -797,6 +798,12 @@ describe("wallet modes", () => {
     expect(approved.purchase?.funding).toEqual(connected.purchase?.funding);
     expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
+    expect(approved.purchase?.unsignedTransaction).toBe("prepared");
+    const cleared = clearWalletReview(approved);
+    expect(cleared.selectedOfferId).toBe(approved.selectedOfferId);
+    expect(cleared.purchase).toMatchObject({ walletKind: "none", walletAddress: null,
+      signatureCapability: "disabled", assets: [], funding: null, swapApproval: null,
+      unsignedTransaction: "not_requested", purchaseApproval: "required", paymentStatus: "PAYMENT_NOT_READY" });
     expect(approved.purchase?.unsignedTransaction).toBe("prepared");
     expect(() => executeSwap()).toThrow(/disabled/i);
     expect(createReadOnlyWallet({ rpcUrl: "https://rpc.example.test", customRpc: false }).requestSignature().status).toBe("disabled");

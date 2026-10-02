@@ -57,3 +57,9 @@ Added a provider-neutral, side-effect-free payment evidence ledger and integrate
 The payment rehearsal now uses the selected product's listed price and quantity, with explicitly invented $5 shipping and $3 tax. Its simulated total binds approval and ledger evidence, while real checkout/funding state remains untouched. Changing product, price or quantity resets rehearsal approval. Positive USD products only; unsupported or absent prices do not launch this fixture.
 
 52 deterministic tests, typecheck, lint and production build pass. Browser verification selected a $39.99 polo, showed $47.99 simulated total and recorded simulated approval; selecting a $42 shirt reset approval and showed $50.00 simulated total. Real final checkout remained unknown. Added DEMO.md with a presenter script, evidence/capability matrix and preparation checklist. A merchant-approved test delivery destination was requested to continue real checkout-total verification; no buyer address or contact details have been invented or submitted.
+
+### Wallet review invalidation
+
+- Wallet Standard account, chain and capability change events now clear the old wallet review, approvals and unsigned transaction immediately. Responses started before that change cannot restore the obsolete review; a queued server reset preserves the selected product.
+- Optional wallet event subscriptions clean up once and ignore late callbacks. Wallets without this feature still have the manual Clear wallet review control.
+- Verification: 54 deterministic tests passed (3 live tests skipped), typecheck/lint/build passed. Browser sample wallet → Clear wallet review removed balances/funding and retained the Black Classic Polo selection. Actual extension event delivery remains unverified without an installed wallet.

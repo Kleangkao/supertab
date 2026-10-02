@@ -1,7 +1,30 @@
 import { expect, it } from "vitest";
-import { connectStandardWallet, discoverStandardWallets, type StandardWallet } from "../src/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, watchStandardWallet, type StandardWallet } from "../src/lib/wallet-standard";
 
 const wallet: StandardWallet = { name: "Late Solana wallet", accounts: [], features: {} };
+
+it("invalidates account, network and capability changes and ignores events after cleanup", () => {
+  let listener: (change: Record<string, unknown>) => void = () => {};
+  let invalidations = 0;
+  let cleanups = 0;
+  const off = watchStandardWallet({ ...wallet, features: { "standard:events": {
+    on: (event: string, callback: typeof listener) => {
+      expect(event).toBe("change"); listener = callback;
+      return () => { cleanups++; };
+    },
+  } } }, () => { invalidations++; });
+  listener({}); listener({ name: "renamed" });
+  expect(invalidations).toBe(0);
+  listener({ accounts: [] }); listener({ chains: ["solana:devnet"] }); listener({ features: {} });
+  expect(invalidations).toBe(3);
+  off(); off(); listener({ accounts: [{ address: "another" }] });
+  expect(invalidations).toBe(3);
+  expect(cleanups).toBe(1);
+});
+
+it("supports wallets without the optional events feature", () => {
+  expect(() => watchStandardWallet(wallet, () => { throw new Error("unexpected event"); })()).not.toThrow();
+});
 
 it("discovers a wallet registered after the app using the standard callback event", () => {
   const target = new EventTarget();
