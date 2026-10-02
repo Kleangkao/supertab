@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# plaintext provider secrets left in the repo directory
+dflow key.txt
+
 # local session data
 /data
 

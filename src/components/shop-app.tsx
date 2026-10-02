@@ -5,6 +5,7 @@ import type { HealthView, OfferView, SessionView } from "@/lib/view";
 
 const EMPTY_HEALTH: HealthView = {
   gemini: "not_configured",
+  geminiModel: "gemini-3.5-flash-lite",
   shopify: "not_configured",
   ebay: "not_configured",
   solana: "unavailable",
@@ -110,6 +111,7 @@ export function ShopApp() {
           </p>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <Status label="Shopping assistant" value={health.gemini} />
+            <Status label="Gemini model" value={health.geminiModel} />
             <Status label="Shopify" value={health.shopify} />
             <Status label="eBay" value={health.ebay} />
             <Status label="Solana" value={health.solana} />

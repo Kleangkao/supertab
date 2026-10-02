@@ -19,6 +19,13 @@ const SCHEMA = {
   required: ["isNewSearch"],
 };
 
+export class GeminiBusyError extends Error {
+  constructor() {
+    super("Gemini is temporarily busy.");
+    this.name = "GeminiBusyError";
+  }
+}
+
 export async function extractConstraintPatch(input: {
   apiKey: string;
   model: string;
@@ -26,35 +33,71 @@ export async function extractConstraintPatch(input: {
   current: ShoppingConstraints;
   history: { role: string; text: string }[];
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<ConstraintPatch | null> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const response = await fetchImpl("https://generativelanguage.googleapis.com/v1beta/interactions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-goog-api-key": input.apiKey,
-    },
-    body: JSON.stringify({
-      model: input.model,
-      input: promptFor(input.message, input.current, input.history),
-      store: false,
-      response_format: {
-        type: "text",
-        mime_type: "application/json",
-        schema: SCHEMA,
+  const sleep = input.sleep ?? delay;
+  let attempt = 0;
+  while (attempt < 2) {
+    const response = await fetchImpl("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": input.apiKey,
       },
-    }),
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) return null;
-  const body = await response.json() as unknown;
-  const text = extractOutputText(body);
-  if (!text) return null;
-  try {
-    return sanitizeModelPatch(JSON.parse(text));
-  } catch {
-    return null;
+      body: JSON.stringify({
+        model: input.model,
+        input: promptFor(input.message, input.current, input.history),
+        store: false,
+        response_format: {
+          type: "text",
+          mime_type: "application/json",
+          schema: SCHEMA,
+        },
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (await isExhausted(response)) {
+      const wait = retryAfterMs(response);
+      if (attempt === 0 && (wait == null || wait <= 1_500)) {
+        await sleep(wait ?? 400);
+        attempt += 1;
+        continue;
+      }
+      throw new GeminiBusyError();
+    }
+    if (!response.ok) return null;
+    const body = await response.json() as unknown;
+    const text = extractOutputText(body);
+    if (!text) return null;
+    try {
+      return sanitizeModelPatch(JSON.parse(text));
+    } catch {
+      return null;
+    }
   }
+  throw new GeminiBusyError();
+}
+
+async function isExhausted(response: Response): Promise<boolean> {
+  if (response.status === 429) return true;
+  if (response.ok) return false;
+  const text = await response.clone().text();
+  return text.includes("RESOURCE_EXHAUSTED");
+}
+
+function retryAfterMs(response: Response): number | null {
+  const header = response.headers.get("retry-after");
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  const date = Date.parse(header);
+  if (Number.isNaN(date)) return null;
+  return Math.max(0, date - Date.now());
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function extractOutputText(body: unknown): string | null {

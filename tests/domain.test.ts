@@ -16,7 +16,7 @@ import { buildHealth } from "../src/lib/health";
 import { readConfig } from "../src/lib/config";
 import { parseTokenAccounts } from "../src/lib/wallet";
 import { JUP_MINT, USDC_MINT, WSOL_MINT, sampleSpendingAssets } from "../src/lib/tokens";
-import { extractOutputText } from "../src/lib/gemini";
+import { extractConstraintPatch, extractOutputText } from "../src/lib/gemini";
 import { configStamp, ShoppingService } from "../src/lib/shopping";
 import type { AppConfig } from "../src/lib/config";
 
@@ -264,8 +264,14 @@ describe("configuration reporting", () => {
       SOLANA_RPC_URL: "https://rpc.example.test/?api-key=rpc-secret-value",
       DFLOW_API_KEY: "dflow-secret-value",
     });
-    const health = await buildHealth(config, async () => Response.json({ result: "ok" }));
+    const health = await buildHealth(config, async (input) => {
+      const url = String(input);
+      if (url.includes("/order")) return Response.json({ inAmount: "1000000", outAmount: "1000" });
+      return Response.json({ result: "ok" });
+    });
     expect(health.gemini).toBe("configured");
+    expect(health.geminiModel).toBe("gemini-3.5-flash-lite");
+    expect(health.dflow).toBe("live_quote");
     expect(health.ebay).toBe("not_configured");
     expect(health.shopify).toBe("configured");
     expect(health.cardRail).toBe("not_connected");
@@ -332,6 +338,89 @@ describe("Gemini interactions", () => {
     expect(second.constraintsLabel).toContain("$50.00");
     expect(second.constraintsLabel).not.toContain("hat");
   });
+
+  it("sends the configured model and retries one short rate limit", async () => {
+    let calls = 0;
+    const patch = await extractConstraintPatch({
+      apiKey: "test-gemini-key",
+      model: "gemini-3.5-flash-lite",
+      message: "Navy is fine too",
+      current: emptyConstraints(),
+      history: [],
+      sleep: async () => undefined,
+      fetchImpl: async (_input, init) => {
+        const sent = JSON.parse(String(init?.body)) as { model?: string };
+        expect(sent.model).toBe("gemini-3.5-flash-lite");
+        calls += 1;
+        if (calls === 1) return new Response("RESOURCE_EXHAUSTED", { status: 429, headers: { "retry-after": "0" } });
+        return Response.json({
+          steps: [{
+            type: "model_output",
+            content: [{ type: "text", text: JSON.stringify({ isNewSearch: false, addColors: ["navy"] }) }],
+          }],
+        });
+      },
+    });
+    expect(calls).toBe(2);
+    expect(patch?.addColors).toEqual(["navy"]);
+  });
+
+  it("keeps the shopper's constraints when Gemini stays rate limited", async () => {
+    let calls = 0;
+    const service = new ShoppingService({
+      config: readConfig({
+        GEMINI_API_KEY: "test-gemini-key",
+        GEMINI_MODEL: "gemini-3.5-flash-lite",
+        EBAY_CLIENT_ID: "",
+        EBAY_CLIENT_SECRET: "",
+        SHOPIFY_CATALOG_ENABLED: "false",
+      }),
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), {
+          status: 429,
+          headers: { "retry-after": "30" },
+        });
+      },
+    });
+    const view = await service.converse(null, "Find me a black polo under $50");
+    expect(calls).toBe(1);
+    expect(view.gemini).toBe("busy");
+    expect(view.constraintsLabel).toContain("polo");
+    expect(view.constraintsLabel).toContain("black");
+    expect(view.constraintsLabel).toContain("$50.00");
+    expect(view.assistantMessage).toContain("briefly busy");
+  });
+
+  it("waits for the active turn before starting another Gemini call", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const service = new ShoppingService({
+      config: readConfig({
+        GEMINI_API_KEY: "test-gemini-key",
+        EBAY_CLIENT_ID: "",
+        EBAY_CLIENT_SECRET: "",
+        SHOPIFY_CATALOG_ENABLED: "false",
+      }),
+      fetchImpl: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return Response.json({
+          steps: [{
+            type: "model_output",
+            content: [{ type: "text", text: JSON.stringify({ isNewSearch: false }) }],
+          }],
+        });
+      },
+    });
+    await Promise.all([
+      service.converse("session-overlap-test", "Find me a black polo under $50"),
+      service.converse("session-overlap-test", "Navy is fine too"),
+    ]);
+    expect(maxActive).toBe(1);
+  });
 });
 
 describe("shopping service config", () => {
@@ -374,6 +463,28 @@ describe("shopping flow", () => {
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
     expect(approved.purchase?.orderStatus).toBe("not_created");
     expect(approved.purchase?.paymentStatus).toBe("not_authorized");
+  });
+
+  it("keeps purchase review available when DFlow fails", async () => {
+    const service = new ShoppingService({
+      config: testConfig(),
+      now: () => new Date("2026-04-02T00:00:00.000Z"),
+      fetchImpl: (input) => {
+        const url = String(input);
+        if (url.includes("dflow.test")) return Promise.resolve(new Response("upstream", { status: 500 }));
+        return mockFetch(input);
+      },
+    });
+    const session = await service.converse(null, "Find me black running shoes, size 42, under $120.");
+    const reviewed = await service.review({
+      sessionId: session.sessionId,
+      offerId: session.exact[0]!.id,
+      walletMode: "sample",
+    });
+    expect(reviewed.purchase?.funding?.deficit).toBe("66.5 USDC");
+    expect(reviewed.purchase?.funding?.quoteFreshness).toBe("missing");
+    expect(reviewed.purchase?.cardRail.availability).toBe("not_connected");
+    expect(reviewed.purchase?.financialExecution).toBe("disabled");
   });
 });
 

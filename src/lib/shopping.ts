@@ -8,7 +8,7 @@ import { classifyOffers } from "./filter-offers";
 import { transitionPurchase, type PurchaseState } from "./purchase";
 import { UnavailablePaymentRail, type PaymentRailStatus } from "./card-rail";
 import { searchShopify } from "./shopify";
-import { extractConstraintPatch } from "./gemini";
+import { extractConstraintPatch, GeminiBusyError } from "./gemini";
 import {
   dflowInputMint,
   sampleSpendingAssets,
@@ -56,6 +56,7 @@ interface SessionRecord {
 
 export class ShoppingService {
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly turns = new Map<string, Promise<SessionView>>();
   private readonly rail = new UnavailablePaymentRail();
 
   constructor(private readonly deps: ShoppingDependencies) {}
@@ -64,6 +65,17 @@ export class ShoppingService {
     const text = message.trim();
     if (!text) throw new Error("Tell SuperTab what you want to buy.");
     const session = this.session(sessionId);
+    const previous = this.turns.get(session.id) ?? Promise.resolve();
+    const turn = previous.then(() => this.completeTurn(session, text), () => this.completeTurn(session, text));
+    this.turns.set(session.id, turn);
+    try {
+      return await turn;
+    } finally {
+      if (this.turns.get(session.id) === turn) this.turns.delete(session.id);
+    }
+  }
+
+  private async completeTurn(session: SessionRecord, text: string): Promise<SessionView> {
     session.messages.push({ role: "user", text });
     const gemini = await this.modelPatch(session, text);
     session.constraints = resolveConstraints(session.constraints, text, gemini.patch);
@@ -294,8 +306,8 @@ export class ShoppingService {
         fetchImpl: this.deps.fetchImpl,
       });
       return { patch, status: patch ? "used" : "fallback" };
-    } catch {
-      return { patch: null, status: "fallback" };
+    } catch (error) {
+      return { patch: null, status: error instanceof GeminiBusyError ? "busy" : "fallback" };
     }
   }
 
@@ -399,11 +411,13 @@ function assistantCopy(input: {
   gemini: SessionView["gemini"];
 }): string {
   const looking = describeConstraints(input.constraints);
-  const lead = input.gemini === "fallback"
-    ? "I couldn't reach the shopping assistant, so I used the words in your message."
-    : input.gemini === "not_configured"
-      ? "I used the words in your message."
-      : "I kept the requirements from your message.";
+  const lead = input.gemini === "busy"
+    ? "The shopping assistant is briefly busy, so I used the words in your message."
+    : input.gemini === "fallback"
+      ? "I couldn't reach the shopping assistant, so I used the words in your message."
+      : input.gemini === "not_configured"
+        ? "I used the words in your message."
+        : "I kept the requirements from your message.";
   const match = input.exact === 0
     ? input.excluded > 0
       ? "No listing matched every requirement."
@@ -424,6 +438,7 @@ export function configStamp(config: AppConfig): string {
     config.shopifyEnabled ? "shopify" : "",
     config.dflowApiKey ? "dflow" : "",
     config.solanaRpcCustom ? "rpc" : "",
+    config.geminiModel,
     config.dflowBaseUrl,
     config.ebayEnvironment,
   ].join("|");

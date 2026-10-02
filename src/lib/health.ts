@@ -11,6 +11,7 @@ export async function buildHealth(
   ]);
   return {
     gemini: config.geminiApiKey ? "configured" : "not_configured",
+    geminiModel: config.geminiModel,
     shopify: config.shopifyEnabled ? "configured" : "not_configured",
     ebay: config.ebayClientId && config.ebayClientSecret ? "configured" : "not_configured",
     solana,
@@ -44,8 +45,11 @@ async function probeDflow(baseUrl: string, apiKey: string | null, fetchImpl: typ
       `${baseUrl.replace(/\/$/, "")}/order?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=50`,
       { headers, signal: AbortSignal.timeout(6_000) },
     );
-    return response.ok ? "available" : "unavailable";
+    if (!response.ok) return apiKey ? "unavailable" : "not_configured";
+    if (!apiKey) return "available";
+    const body = await response.json() as { outAmount?: unknown };
+    return typeof body.outAmount === "string" && BigInt(body.outAmount) > 0n ? "live_quote" : "authenticated";
   } catch {
-    return "unavailable";
+    return apiKey ? "unavailable" : "not_configured";
   }
 }

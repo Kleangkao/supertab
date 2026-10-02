@@ -112,17 +112,18 @@ export interface SessionView {
   exact: OfferView[];
   excluded: ExcludedOfferView[];
   providers: ProviderNote[];
-  gemini: "used" | "fallback" | "not_configured";
+  gemini: "used" | "fallback" | "busy" | "not_configured";
   selectedOfferId: string | null;
   purchase: PurchaseView | null;
 }
 
 export interface HealthView {
   gemini: "configured" | "not_configured";
+  geminiModel: string;
   shopify: "configured" | "not_configured";
   ebay: "configured" | "not_configured";
   solana: "available" | "unavailable";
-  dflow: "available" | "unavailable";
+  dflow: "not_configured" | "available" | "authenticated" | "live_quote" | "unavailable";
   cardRail: "not_connected";
   financialExecution: "disabled";
 }
