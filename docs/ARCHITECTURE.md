@@ -18,6 +18,8 @@ Amounts are bigint minor units. USDC is recognized only by mint `EPjFWdd5AufqSSq
 
 `createReadOnlyWallet` reads SOL and SPL balances through JSON-RPC. It refuses to prepare a signature. The sample preview is labeled and is not chain data.
 
+`/api/wallet/control` permits same-origin POSTs to request and verify a nonfinancial message challenge for the connected session address. `wallet-proof.ts` binds that challenge to the current terms ID, app origin, session, nonce and five-minute deadline. The server verifies the exact UTF-8 message with Ed25519 using the address-derived public key, consumes every verification attempt and stores only proof timestamps. It never stores signatures or grants execution permissions. Client Wallet Standard signing rejects modified messages, wrong signature formats and stale selected accounts. A review or account change invalidates the challenge/proof. A browser extension is still needed to prove the real user ceremony.
+
 `planFunding` spends existing USDC first, leaves 0.01 SOL untouched, and does not liquidate other tokens unless the shopper selects one. SOL is the only suggested funding asset. A DFlow quote is attached only when it matches the planning amount and the funding mint and is younger than 45 seconds. DFlow's quote-only response does not include an expiry, so that window is SuperTab's.
 
 `fetchDflowOrder` calls `GET /order` on `DFLOW_QUOTE_BASE_URL`. Production is `https://quote-api.dflow.net` and sends `x-api-key`. The dev host works without a key. The request does not pass a wallet, so DFlow does not return a transaction. `executeSwap`, `executeCardPayment`, and `broadcastTransaction` always throw.

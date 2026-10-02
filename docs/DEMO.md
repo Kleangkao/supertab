@@ -17,7 +17,7 @@
 | Product discovery | Real Shopify catalog; configured eBay Browse | Listed amount is not a final checkout total |
 | Merchant review | Provider-returned HTTPS cart/product link; actual True Classic checkout inspected | Checkout was incomplete without delivery/contact details |
 | Wallet balance | Real Solana RPC reads, aggregated token accounts | Address reads do not prove wallet ownership or purchase consent |
-| Wallet connection | Wallet Standard registration and connect architecture; deterministic tests | Real extension account lifecycle and signing are not fully proven; signing is disabled |
+| Wallet connection | Wallet Standard discovery/connect and explicit message-control checks; real Ed25519 verification in deterministic tests | Extension signing remains unproven in the in-app browser. Message proof is not transaction or purchase approval |
 | Funding | Integer amounts, existing canonical USDC, reserved SOL, selected asset | Current amount is a planning amount; sample assets are labeled |
 | DFlow | Live quotes and structurally valid unsigned preparation verified | No signing, broadcast, executed swap or execution simulation |
 | Final-total integration | Authenticated Shopify `get_checkout`, exact variant/quantity binding, integer breakdown checks and five-minute freshness; deterministic adapter/service tests | Existing checkout reference and explicitly configured merchant origin required; live final-total acceptance remains unproven |

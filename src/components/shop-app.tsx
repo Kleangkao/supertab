@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
 import { CheckoutReview } from "@/components/checkout-review";
-import { connectStandardWallet, discoverStandardWallets, watchStandardWallet, type StandardWallet } from "@/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, signWalletMessage, supportsWalletMessage, watchStandardWallet, type StandardWallet } from "@/lib/wallet-standard";
+import type { WalletChallenge } from "@/lib/wallet-proof";
 import { clearWalletReview } from "@/lib/wallet-review";
 import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
 
@@ -25,10 +26,13 @@ export function ShopApp() {
   const [showAddressInput, setShowAddressInput] = useState(false);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   const [walletChoices, setWalletChoices] = useState<StandardWallet[]>([]);
+  const [walletChallenge, setWalletChallenge] = useState<WalletChallenge | null>(null);
+  const [canSignMessage, setCanSignMessage] = useState(false);
   const [now, setNow] = useState(0);
   const lock = useRef(false);
   const walletEpoch = useRef(0);
   const walletOff = useRef<(() => void) | null>(null);
+  const activeWallet = useRef<StandardWallet | null>(null);
   const latestSession = useRef<SessionView | null>(null);
   const pendingWalletReset = useRef<{ sessionId: string; offerId: string; quantity: number } | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
@@ -53,7 +57,7 @@ export function ShopApp() {
         if (!response.ok) throw new Error("Your previous search expired. Let’s find something new.");
         const restored = await response.json() as SessionView;
         if (restored.purchase?.walletMode === "connected") {
-          restored.purchase = { ...restored.purchase, walletMode: "address", walletKind: "read_only", signatureCapability: "disabled" };
+          restored.purchase = { ...restored.purchase, walletMode: "address", walletKind: "read_only", signatureCapability: "disabled", walletControl: null };
         }
         latestSession.current = restored;
         setSession(restored);
@@ -101,6 +105,7 @@ export function ShopApp() {
 
   function invalidateWallet() {
     walletOff.current?.(); walletOff.current = null;
+    activeWallet.current = null; setWalletChallenge(null); setCanSignMessage(false);
     walletEpoch.current++;
     setWalletMode("none"); setAddress(""); setFundingMint(null);
     const current = latestSession.current;
@@ -121,10 +126,12 @@ export function ShopApp() {
     if (body) { setDraft(""); setFundingMint(null); }
   }
 
-  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable = false, quantity?: number) {
+  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable?: boolean, quantity?: number) {
     if (!session) return;
-    if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; }
-    const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, quantity: quantity ?? (session.selectedOfferId === offerId ? session.purchase?.checkout.quantity ?? 1 : 1), walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
+    setWalletChallenge(null);
+    if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; setCanSignMessage(false); }
+    const canSign = signatureAvailable ?? (mode === "connected" && !!activeWallet.current?.features["solana:signTransaction"]);
+    const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, quantity: quantity ?? (session.selectedOfferId === offerId ? session.purchase?.checkout.quantity ?? 1 : 1), walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable: canSign }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
     if (body) {
       setWalletMode(mode); setAddress(nextAddress); setFundingMint(mint);
       setShowAddressInput(!!body.purchase?.balanceError);
@@ -141,6 +148,7 @@ export function ShopApp() {
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
+      activeWallet.current = wallet; setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
       walletOff.current?.();
       const epoch = walletEpoch.current;
       walletOff.current = watchStandardWallet(wallet, invalidateWallet);
@@ -149,6 +157,38 @@ export function ShopApp() {
       if (session?.selectedOfferId) await selectOffer(session.selectedOfferId, "connected", connected.address, null, connected.canRequestSignature);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
     finally { lock.current = false; setBusy(null); flushWalletReset(); }
+  }
+
+  async function checkWalletControl(sign = false) {
+    const current = latestSession.current;
+    const wallet = activeWallet.current;
+    if (lock.current || !current?.purchase?.walletAddress || !wallet) return;
+    const epoch = walletEpoch.current;
+    lock.current = true; setError(null); setBusy(sign ? "Waiting for your wallet’s message signature…" : "Preparing a wallet control check…");
+    try {
+      const terms = { sessionId: current.sessionId, termsId: current.purchase.termsId };
+      if (!sign) {
+        const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...terms, action: "challenge" }), signal: AbortSignal.timeout(12_000) });
+        const body = await response.json() as WalletChallenge & { error?: string };
+        if (!response.ok) throw new Error(body.error ?? "Could not prepare the wallet check.");
+        if (epoch === walletEpoch.current) setWalletChallenge(body);
+        return;
+      }
+      const challenge = walletChallenge;
+      if (!challenge || challenge.address !== current.purchase.walletAddress || challenge.termsId !== terms.termsId
+        || currentTime() >= Date.parse(challenge.expiresAt)) throw new Error("Request a fresh wallet check before signing.");
+      const signature = await signWalletMessage(wallet, challenge.address, challenge.message);
+      if (epoch !== walletEpoch.current) return;
+      const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...terms, action: "verify", challengeId: challenge.id, signature }), signal: AbortSignal.timeout(12_000) });
+      const body = await response.json() as SessionView & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "The signature could not be verified.");
+      if (epoch !== walletEpoch.current) return;
+      latestSession.current = body; setSession(body); setNow(currentTime()); setWalletChallenge(null);
+    } catch (caught) {
+      if (epoch === walletEpoch.current) { setWalletChallenge(null); setError(caught instanceof Error ? caught.message : "Your wallet check was canceled."); }
+    } finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
   const purchase = session?.purchase;
@@ -215,6 +255,15 @@ export function ShopApp() {
           <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
           {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
           {purchase.walletKind !== "none" && <button className="secondary" disabled={!!busy} onClick={invalidateWallet}>Clear wallet review</button>}
+          {purchase.walletKind === "connected" && <div className="wallet-control">
+            {purchase.walletControl && now < Date.parse(purchase.walletControl.expiresAt)
+              ? <p className="section-copy">Wallet control verified with a message signature. Swap and purchase approval are still separate.</p>
+              : canSignMessage
+                ? <><p className="section-copy">Prove this wallet is yours with a short message. This approves no purchase and moves no funds.</p>
+                  {walletChallenge && walletChallenge.termsId === purchase.termsId && now < Date.parse(walletChallenge.expiresAt) ? <><pre className="wallet-message">{walletChallenge.message}</pre><button className="secondary" disabled={!!busy} onClick={() => void checkWalletControl(true)}>Sign wallet control message</button></>
+                    : <button className="secondary" disabled={!!busy} onClick={() => void checkWalletControl()}>Review wallet control message</button>}</>
+                : <p className="section-copy">This connection has no message-signing capability. Wallet control remains unverified.</p>}
+          </div>}
           {purchase.walletKind === "sample" && <p className="sample-note">Illustrative balances, not your assets. No transaction is prepared for a sample wallet.</p>}
           {purchase.balanceError && <p className="inline-error" role="alert">We couldn’t read this wallet. {purchase.balanceError}</p>}
           {purchase.assets.length > 0 && <div className="assets">{purchase.assets.filter(asset => asset.isUsdc || asset.kind === "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? "Token"} value={asset.amountDisplay} />)}{purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <details className="review-details"><summary>Other tokens in this wallet</summary>{purchase.assets.filter(asset => !asset.isUsdc && asset.kind !== "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? maskAddress(asset.mint)} value={asset.amountDisplay} />)}<p>Unrecognized tokens are shown by mint address. They have no assumed dollar value or guaranteed conversion route.</p></details>}</div>}
@@ -230,7 +279,7 @@ export function ShopApp() {
             <details className="review-details"><summary>Conversion details & network reserve</summary><Row label="Exact funding gap" value={purchase.funding.deficit} /><Row label="Price impact" value={live ? purchase.funding.priceImpact ?? "Not reported" : "Refresh quote"} /><Row label="Slippage tolerance" value={purchase.funding.slippageBps == null ? "Not reported" : `${purchase.funding.slippageBps / 100}%`} /><Row label="SOL kept for fees" value={purchase.funding.reserve} /><Row label="Platform fee" value={purchase.funding.platformFee ?? "Not reported"} /><ul>{purchase.funding.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
           </> : <p>Funding is temporarily unavailable. Your selected product is preserved.</p>}
         </Block>
-        <Block step="3" title="You approve the next step"><div className={`approval-state ${prepared ? "ready" : ""}`}><span className="badge">{prepared ? "Transaction prepared" : expired ? "Refresh required" : "Swap not executed"}</span><h3>{prepared ? "Ready for your approval" : purchase.walletKind === "sample" ? "This is a sample preview" : live && !purchase.funding?.fundable ? "More funding needed." : live ? "Quote ready. Transaction not prepared." : "Your money stays in your wallet."}</h3><p>{prepared ? "A real unsigned transaction has been prepared and its format checked. It would convert the asset amount above into USDC, subject to the quote’s minimum received and slippage." : live && !purchase.funding?.fundable ? "This asset cannot cover the full funding gap while preserving the network reserve." : live ? "A live quote is available. Use a real wallet and refresh to try preparing an unsigned transaction." : "No swap has been signed or broadcast."}</p>{prepared && <strong className="approval-label">AWAITING USER APPROVAL</strong>}<p className="section-copy">Wallet signing and financial execution are disabled in this demo. Swap not executed.</p></div></Block>
+        <Block step="3" title="You approve the next step"><div className={`approval-state ${prepared ? "ready" : ""}`}><span className="badge">{prepared ? "Transaction prepared" : expired ? "Refresh required" : "Swap not executed"}</span><h3>{prepared ? "Ready for your approval" : purchase.walletKind === "sample" ? "This is a sample preview" : live && !purchase.funding?.fundable ? "More funding needed." : live ? "Quote ready. Transaction not prepared." : "Your money stays in your wallet."}</h3><p>{prepared ? "A real unsigned transaction has been prepared and its format checked. It would convert the asset amount above into USDC, subject to the quote’s minimum received and slippage." : live && !purchase.funding?.fundable ? "This asset cannot cover the full funding gap while preserving the network reserve." : live ? "A live quote is available. Use a real wallet and refresh to try preparing an unsigned transaction." : "No swap has been signed or broadcast."}</p>{prepared && <strong className="approval-label">AWAITING USER APPROVAL</strong>}<p className="section-copy">Transaction signing and financial execution are disabled in this demo. A wallet control message does not approve or execute a swap.</p></div></Block>
         <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ wallet-backed CardRail → merchant</div><span className="badge">Card rail not connected</span><p>Preferred integration: Bridge + Stripe Issuing. Sandbox access is blocked; no card has been issued. Merchant order creation is not implemented.</p><div className="end-states"><span>Payment not executed</span><span>Order not created</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
         <p className="section-copy">Purchase approval becomes available after the final merchant total is verified. A live conversion quote does not mean USDC is ready or a payment has been approved.</p>
         {selected?.currency === "USD" && selected.priceMinor && BigInt(selected.priceMinor) > 0n && <PaymentRehearsal key={`${selected.id}:${selected.priceMinor}:${purchase.checkout.quantity}`} itemMinor={selected.priceMinor} quantity={purchase.checkout.quantity} title={selected.title} />}

@@ -26,7 +26,7 @@ export function isPlausibleAddress(address: string): boolean {
   return decodeBase58(trimmed)?.length === 32;
 }
 
-function decodeBase58(value: string): Uint8Array | null {
+export function decodeBase58(value: string): Uint8Array | null {
   let amount = 0n;
   for (const char of value) {
     const digit = BASE58.indexOf(char);

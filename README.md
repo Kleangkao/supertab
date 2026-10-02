@@ -24,7 +24,9 @@ The purchase review links to the provider's merchant cart or product page when a
 
 ## What is not executable
 
-SuperTab will not swap, sign, broadcast, issue a card, or pay a merchant. The interface stops at awaiting user approval and exposes no execution button. Existing approval endpoints record intent only.
+SuperTab will not sign or broadcast transactions, execute swaps, issue cards, or pay merchants. Connected wallets that support `solana:signMessage` can explicitly sign a wallet-control message. This is independent of purchase and swap consent. Existing approval endpoints record intent only.
+
+Wallet control uses a server-generated challenge bound to the app origin, session, current review, address and random nonce. The shopper reads the exact message before requesting the signature. The server verifies Ed25519, consumes the challenge on any verification attempt, and discards the signature. Challenges and proofs expire after five minutes; a review refresh or wallet change clears them. Tests use generated ephemeral keys to verify real signatures and rejection paths. A real extension signing ceremony has not yet been demonstrated in this PC's in-app browser; message proof does not establish transaction-signing readiness.
 
 Purchase approval additionally requires a verified final merchant checkout total. A catalog or listing planning amount is rejected with HTTP 403 rather than recorded as an approved purchase. Payment readiness requires final-total knowledge, current approval, real on-chain USDC coverage and a ready rail; a live conversion quote or sample balance cannot substitute for funds already available.
 

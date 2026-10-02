@@ -28,6 +28,7 @@ import {
 } from "./serialize";
 import type { ProviderNote, PurchaseView, SessionView } from "./view";
 import { checkoutAccess, readMerchantCheckout, type CheckoutEvidence } from "./merchant-checkout";
+import { createWalletChallenge, verifyWalletChallenge, type WalletChallenge } from "./wallet-proof";
 
 export interface ShoppingDependencies {
   config: AppConfig;
@@ -49,6 +50,8 @@ interface SessionRecord {
   walletMode: "none" | "sample" | "address" | "connected";
   signatureCapability: "disabled" | "available" | "unavailable";
   walletAddress: string | null;
+  walletChallenge: WalletChallenge | null;
+  walletProof: { verifiedAt: string; expiresAt: string } | null;
   balances: AssetBalance[];
   balanceSource: PurchaseView["balanceSource"];
   balanceError: string | null;
@@ -90,7 +93,7 @@ export class ShoppingService {
   private async completeTurn(current: SessionRecord, text: string): Promise<SessionView> {
     const session: SessionRecord = { ...current, messages: [...current.messages],
       selectedOfferId: null, snapshot: null, plan: null, quote: null, swapApproval: null,
-      checkoutEvidence: null, termsId: crypto.randomUUID(),
+      checkoutEvidence: null, termsId: crypto.randomUUID(), walletChallenge: null, walletProof: null,
       purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING" };
     this.sessions.set(session.id, session);
     session.messages.push({ role: "user", text });
@@ -175,6 +178,8 @@ export class ShoppingService {
     }
     session.selectedOfferId = offer.id;
     session.purchaseIntent = null;
+    session.walletChallenge = null;
+    session.walletProof = null;
     // A new wallet, product, balance read or explicit refresh needs its own quote.
     session.quote = null;
     session.unsignedTransaction = "not_requested";
@@ -232,6 +237,31 @@ export class ShoppingService {
 
   getSession(sessionId: string): SessionView {
     return this.view(this.requireSession(sessionId));
+  }
+
+  requestWalletCheck(sessionId: string, termsId: string, origin: string): WalletChallenge {
+    const session = this.requireSession(sessionId);
+    if (session.walletMode !== "connected" || !session.walletAddress || session.termsId !== termsId) {
+      throw new Error("Reconnect your wallet and review the current product first.");
+    }
+    session.walletProof = null;
+    session.walletChallenge = createWalletChallenge({ sessionId, termsId, origin,
+      address: session.walletAddress, nowMs: this.nowMs() });
+    return session.walletChallenge;
+  }
+
+  confirmWalletCheck(sessionId: string, termsId: string, challengeId: string, signature: string): SessionView {
+    const session = this.requireSession(sessionId);
+    const challenge = session.walletChallenge;
+    // Consume every attempt, including rejected signatures. No signature is stored.
+    session.walletChallenge = null;
+    if (!challenge || session.walletMode !== "connected" || !session.walletAddress || session.termsId !== termsId) {
+      throw new Error("This wallet check is no longer current. Request a new check.");
+    }
+    verifyWalletChallenge(challenge, { termsId, challengeId, signature,
+      address: session.walletAddress, nowMs: this.nowMs() });
+    session.walletProof = { verifiedAt: new Date(this.nowMs()).toISOString(), expiresAt: challenge.expiresAt };
+    return this.view(session);
   }
 
   async verifyMerchantTotal(sessionId: string, termsId: string, checkoutId: string): Promise<SessionView> {
@@ -527,6 +557,7 @@ export class ShoppingService {
             ? "connected"
             : session.walletMode === "address" ? "read_only" : "none",
         walletAddress: session.walletAddress,
+        walletControl: session.walletProof && this.nowMs() < Date.parse(session.walletProof.expiresAt) ? session.walletProof : null,
         signatureCapability: session.signatureCapability,
         transactionVersion: session.transactionVersion,
         balanceSource: session.balanceSource,
@@ -579,6 +610,8 @@ function emptySession(id: string): SessionRecord {
     walletMode: "none",
     signatureCapability: "disabled",
     walletAddress: null,
+    walletChallenge: null,
+    walletProof: null,
     balances: [],
     balanceSource: "none",
     balanceError: null,

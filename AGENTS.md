@@ -10,5 +10,5 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # SuperTab
 
-Financial execution is disabled. Do not add code that signs, broadcasts, swaps, issues a card, or pays a merchant. Quotes and balance reads are allowed. Secrets belong only in `.env.local`.
+Financial execution is disabled. The owner permits explicit wallet message signing for nonfinancial wallet-control checks and sandbox/devnet signing UX. Do not sign or broadcast production transactions, execute swaps, issue production cards, or pay merchants without further owner authorization. Quotes and balance reads are allowed. Secrets belong only in `.env.local`.
 

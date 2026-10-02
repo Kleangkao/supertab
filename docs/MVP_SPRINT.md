@@ -1,6 +1,6 @@
 # MVP sprint — started October 2, 2026
 
-The existing app stays in place. Financial execution remains disabled under AGENTS.md. Signing, broadcasts, card issuance and merchant payments are outside this implementation. Secrets remain in .env.local.
+The existing app stays in place. Financial execution remains disabled. The owner's sprint prompt permits wallet signing UX and sandbox/devnet work; explicit nonfinancial message signing is now implemented. Production transactions, broadcasts, card issuance and merchant payments remain disabled. Secrets remain in .env.local. Earlier cycles below describe their state at the time; the latest verified cycle is authoritative.
 
 ## First verified cycle
 
@@ -63,3 +63,13 @@ The payment rehearsal now uses the selected product's listed price and quantity,
 - Wallet Standard account, chain and capability change events now clear the old wallet review, approvals and unsigned transaction immediately. Responses started before that change cannot restore the obsolete review; a queued server reset preserves the selected product.
 - Optional wallet event subscriptions clean up once and ignore late callbacks. Wallets without this feature still have the manual Clear wallet review control.
 - Verification: 54 deterministic tests passed (3 live tests skipped), typecheck/lint/build passed. Browser sample wallet → Clear wallet review removed balances/funding and retained the Black Classic Polo selection. Actual extension event delivery remains unverified without an installed wallet.
+
+## PC restoration, merchant-total read and wallet-control cycle — October 3, 2026
+
+The downloaded archive is now a runnable checkout tracking the owner's existing private Kleangkao/supertab repository. Relevant existing credentials were restored to the ignored local environment file without printing values. All three opt-in live tests passed on this PC: RPC balances, production DFlow quote and real unsigned preparation. No financial action occurred.
+
+Merchant-total reading uses authenticated Shopify get_checkout at an explicitly allowed merchant origin. A ready, matching USD checkout with current expiry and reconciled totals can establish final-total evidence. The server checks product/variant/quantity, clears old approval before refresh, rejects stale terms and drops buyer/payment/capability data from session output. Browser verification reached the real selected True Classic checkout; the read endpoint returned HTTP 422. No live final total was accepted. The incomplete merchant checkout and access failure remain unresolved; deterministic merchant fixtures prove application rules only.
+
+Added explicit Wallet Standard message signing with server-side Ed25519 verification. Users review the challenge before signing. App origin, session, address, review ID, nonce and expiry bind the proof; every verification attempt consumes the challenge. Review or wallet changes reset it. Proof does not authorize a swap, payment or order. Tests use real ephemeral keys and cover wrong keys/messages, expiry, replay, replaced challenges and refresh. Browser verification found no wallet extension and correctly showed the read-only fallback, so the actual extension ceremony remains unproven. The same-origin HTTP guard rejected a cross-origin request with 403.
+
+Verification: 73 deterministic tests pass; lint, typecheck and production build pass. The prior three live provider tests remain applicable; no provider path was changed in this message-signing cycle. CardRail lifecycle and independent order evidence remain local simulation, not Bridge/Stripe sandbox evidence. Biggest gaps: live merchant final-total access and actual extension transaction signing, followed by legitimate provider sandbox access. Next: validate the user-controlled transaction-signing path in an isolated devnet flow without claiming conversion or spending readiness.
