@@ -65,10 +65,32 @@ export async function readMerchantCheckout(input: {
   } catch { throw new Error("The merchant returned an unreadable checkout."); }
   const root = record(payload);
   const result = record(root?.result);
-  if (root?.error || result?.isError) throw new Error("The merchant could not read this checkout. No final total was accepted.");
-  return verifyCheckout(record(result?.structuredContent), {
+  if (root?.error) throw new Error("The merchant could not read this checkout. No final total was accepted.");
+  const checkout = checkoutDocument(result);
+  // Shopify can mark an existing incomplete document as a tool error. Explain
+  // that state, but never use an error result to establish a payable amount.
+  if (result?.isError) {
+    if (checkout?.id === input.checkoutId && checkout.status === "incomplete") {
+      throw new Error("The merchant checkout is not ready. Finish the required delivery and buyer details at the merchant, then verify again.");
+    }
+    throw new Error("The merchant could not read this checkout. No final total was accepted.");
+  }
+  return verifyCheckout(checkout, {
     offer: input.offer, quantity: input.quantity, checkoutId: input.checkoutId, merchantOrigin: origin, nowMs: input.nowMs,
   });
+}
+
+function checkoutDocument(result: Record<string, unknown> | null): Record<string, unknown> | null {
+  // Both MCP representations come from the authenticated server response.
+  // Prefer structured content; never replace it with a conflicting text block.
+  if (result?.structuredContent !== undefined) return record(result.structuredContent);
+  if (!Array.isArray(result?.content)) return null;
+  for (const raw of result.content) {
+    const block = record(raw);
+    if (block?.type !== "text" || typeof block.text !== "string") continue;
+    try { const parsed = record(JSON.parse(block.text)); if (parsed) return parsed; } catch { /* Ignore opaque text. */ }
+  }
+  return null;
 }
 
 async function checkoutToken(config: AppConfig, fetchImpl: typeof fetch): Promise<string> {

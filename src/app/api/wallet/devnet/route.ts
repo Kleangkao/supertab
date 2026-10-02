@@ -1,4 +1,5 @@
 import { getShoppingService } from "@/lib/shopping";
+import { sameOriginRequest } from "@/lib/request-origin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -6,8 +7,8 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const headers = { "cache-control": "no-store" };
   try {
-    const origin = new URL(request.url).origin;
-    if (request.headers.get("origin") !== origin) return Response.json({ error: "Use the devnet check from SuperTab." }, { status: 403, headers });
+    const origin = sameOriginRequest(request);
+    if (!origin) return Response.json({ error: "Use the devnet check from SuperTab." }, { status: 403, headers });
     const body = await request.json() as Record<string, unknown>;
     if (typeof body.sessionId !== "string" || typeof body.termsId !== "string") throw new Error("Review a product first.");
     const service = getShoppingService();

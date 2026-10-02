@@ -29,6 +29,28 @@ function checkout() {
 }
 
 describe("authenticated merchant checkout evidence", () => {
+  it("reads a text-only JSON checkout through the same strict verification", async () => {
+    const evidence = await readMerchantCheckout({ ...context, config, fetchImpl: async () => Response.json({ result: {
+      content: [{ type: "text", text: JSON.stringify(checkout()) }],
+    } }) });
+    expect(evidence.snapshot.merchantTotalMinor).toBe(1750n);
+    expect(Object.keys(evidence)).not.toContain("buyer");
+  });
+
+  it("recognizes an incomplete error document without accepting its amount", async () => {
+    await expect(readMerchantCheckout({ ...context, config, fetchImpl: async () => Response.json({ result: {
+      isError: true, content: [{ type: "text", text: JSON.stringify({ ...checkout(), status: "incomplete" }) }],
+    } }) })).rejects.toThrow(/not ready/);
+  });
+
+  it("never accepts a ready document from an error result or opaque text", async () => {
+    for (const result of [{ isError: true, structuredContent: checkout() },
+      { content: [{ type: "text", text: "DO_NOT_EXPOSE_PROVIDER_TEXT" }] },
+      { content: [{ type: "text", text: JSON.stringify({ ...checkout(), id: "wrong" }) }] }]) {
+      await expect(readMerchantCheckout({ ...context, config, fetchImpl: async () => Response.json({ result }) })).rejects.toThrow();
+    }
+  });
+
   it("keeps a single-variant merchant cart link aligned with the selected quantity", () => {
     expect(toOfferView(offer!, 2).merchantReviewUrl).toBe("https://merchant.test/cart/1:2");
     expect(toOfferView(offer!, 1).merchantReviewUrl).toBe("https://merchant.test/cart/1:1");

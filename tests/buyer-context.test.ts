@@ -18,6 +18,7 @@ describe("trusted buyer network context", () => {
     expect(buyerIpForRequest(new Request("http://127.0.0.1:3000/api/purchase/checkout", { headers: { origin: "http://127.0.0.1:3000" } }), config)).toBe("8.8.8.8");
     expect(buyerIpForRequest(new Request("https://supertab.test/api/purchase/checkout", { headers: { origin: "https://supertab.test" } }), config)).toBeNull();
     expect(buyerIpForRequest(new Request("http://127.0.0.1:3000/api/purchase/checkout", { headers: { origin: "https://other.test" } }), config)).toBeNull();
+    expect(buyerIpForRequest(new Request("http://localhost:3000/api/purchase/checkout", { headers: { origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000" } }), config)).toBe("8.8.8.8");
   });
 
   it("ignores unconfigured proxy headers and rejects lists or unsupported header names", () => {

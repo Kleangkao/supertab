@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { sameOriginRequest } from "./request-origin";
 
 /** Buyer network context is private request data, never a session/model field. */
 export function publicBuyerIp(value: string | null | undefined): string | null {
@@ -20,7 +21,7 @@ export function buyerIpForRequest(request: Request, config: {
   shopifyLocalBuyerIp: string | null; shopifyBuyerIpHeader: string | null;
 }): string | null {
   const url = new URL(request.url);
-  if (request.headers.get("origin") !== url.origin) return null;
+  if (!sameOriginRequest(request)) return null;
   const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
   if (local && config.shopifyLocalBuyerIp) return publicBuyerIp(config.shopifyLocalBuyerIp);
   // Only configured headers from a proxy that overwrites incoming client values.
