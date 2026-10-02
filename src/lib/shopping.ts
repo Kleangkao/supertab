@@ -415,11 +415,26 @@ function assistantCopy(input: {
   return [lead, match, ...notes].filter(Boolean).join(" ");
 }
 
-const globalStore = globalThis as { __supertab?: ShoppingService };
+const globalStore = globalThis as { __supertab?: ShoppingService; __supertabStamp?: string };
+
+export function configStamp(config: AppConfig): string {
+  return [
+    config.geminiApiKey ? "gemini" : "",
+    config.ebayClientId && config.ebayClientSecret ? "ebay" : "",
+    config.shopifyEnabled ? "shopify" : "",
+    config.dflowApiKey ? "dflow" : "",
+    config.solanaRpcCustom ? "rpc" : "",
+    config.dflowBaseUrl,
+    config.ebayEnvironment,
+  ].join("|");
+}
 
 export function getShoppingService(): ShoppingService {
-  if (!globalStore.__supertab) {
-    globalStore.__supertab = new ShoppingService({ config: readConfig() });
+  const config = readConfig();
+  const stamp = configStamp(config);
+  if (!globalStore.__supertab || globalStore.__supertabStamp !== stamp) {
+    globalStore.__supertab = new ShoppingService({ config });
+    globalStore.__supertabStamp = stamp;
   }
   return globalStore.__supertab;
 }

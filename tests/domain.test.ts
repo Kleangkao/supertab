@@ -17,7 +17,7 @@ import { readConfig } from "../src/lib/config";
 import { parseTokenAccounts } from "../src/lib/wallet";
 import { JUP_MINT, USDC_MINT, WSOL_MINT, sampleSpendingAssets } from "../src/lib/tokens";
 import { extractOutputText } from "../src/lib/gemini";
-import { ShoppingService } from "../src/lib/shopping";
+import { configStamp, ShoppingService } from "../src/lib/shopping";
 import type { AppConfig } from "../src/lib/config";
 
 const NOW = "2026-04-02T00:00:00.000Z";
@@ -331,6 +331,16 @@ describe("Gemini interactions", () => {
     expect(second.constraintsLabel).toContain("navy");
     expect(second.constraintsLabel).toContain("$50.00");
     expect(second.constraintsLabel).not.toContain("hat");
+  });
+});
+
+describe("shopping service config", () => {
+  it("rebuilds when eBay credentials appear", () => {
+    const empty = configStamp(readConfig({ EBAY_CLIENT_ID: "", EBAY_CLIENT_SECRET: "" }));
+    const ready = configStamp(readConfig({ EBAY_CLIENT_ID: "app", EBAY_CLIENT_SECRET: "cert" }));
+    expect(ready).not.toBe(empty);
+    expect(ready).not.toContain("cert");
+    expect(ready).not.toContain("app");
   });
 });
 
