@@ -10,11 +10,13 @@ The existing app stays in place. Financial execution remains disabled under AGEN
 - Browser verification searched real Shopify products, selected a $27 Black Torrey Polo, and exercised simulated approval, authorization, capture, independent order evidence and refund. Real checkout total stayed unknown.
 - GitHub repository lookup and git ls-remote both returned Repository not found. Push is blocked by repository access; do not change the destination or publish elsewhere.
 
-## Capability boundaries
-
 ## Wallet funding correction
 
 A second red/green regression reproduces two canonical USDC accounts ($5 and $7) incorrectly funding a $10 planning amount from the first account only. The wallet reader now aggregates all accounts by mint before planning, quoting or display; conflicting decimals fail the balance read instead of combining incompatible units. The suite now has 40 deterministic passing tests (three opt-in live checks remain skipped).
+
+## Capability boundaries
+
+After the deterministic checks, all three opt-in live checks passed using local environment configuration and the explicit public demo address: Solana SOL/token balance reads, a real DFlow SOL → USDC quote without a transaction, and structurally valid unsigned preparation without exposing its payload. No signature, broadcast or payment occurred.
 
 Real discovery and provider-backed wallet/quote reads remain available in the implementation. This cycle verified real Shopify discovery in the browser, not wallet signing, live payment or a merchant order. Local rehearsal never changes the shopping session's approval, funding, payment or order status and never calls Bridge or Stripe. It is not provider sandbox proof.
 
