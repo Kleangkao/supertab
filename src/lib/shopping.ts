@@ -75,7 +75,7 @@ export class ShoppingService {
     if (!text) throw new Error("Tell SuperTab what you want to buy.");
     const session = this.session(sessionId);
     const previous = this.turns.get(session.id) ?? Promise.resolve();
-    const turn = previous.then(() => this.completeTurn(session, text), () => this.completeTurn(session, text));
+    const turn = previous.then(() => this.completeTurn(this.requireSession(session.id), text), () => this.completeTurn(this.requireSession(session.id), text));
     this.turns.set(session.id, turn);
     try {
       return await turn;
@@ -84,7 +84,11 @@ export class ShoppingService {
     }
   }
 
-  private async completeTurn(session: SessionRecord, text: string): Promise<SessionView> {
+  private async completeTurn(current: SessionRecord, text: string): Promise<SessionView> {
+    const session: SessionRecord = { ...current, messages: [...current.messages],
+      selectedOfferId: null, snapshot: null, plan: null, quote: null, swapApproval: null,
+      purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING" };
+    this.sessions.set(session.id, session);
     session.messages.push({ role: "user", text });
     const gemini = await this.modelPatch(session, text);
     session.constraints = resolveConstraints(session.constraints, text, gemini.patch);
@@ -118,6 +122,7 @@ export class ShoppingService {
       }),
     ]);
     const classified = classifyOffers([...shopify.offers, ...ebay.offers], session.constraints);
+    if (this.sessions.get(session.id) !== session) return this.view(this.requireSession(session.id));
     session.offers = classified.exact;
     session.excluded = classified.excluded.map((item) => ({ id: item.offer.id, reasons: item.reasons }));
     this.rememberExcluded(session, classified.excluded.map((item) => item.offer));
@@ -152,7 +157,11 @@ export class ShoppingService {
     fundingMint?: string | null;
     signatureAvailable?: boolean;
   }): Promise<SessionView> {
-    const session = this.requireSession(input.sessionId);
+    // Each review owns a separate working record. A slower wallet/quote read
+    // must never mutate a newer review (including a clear-wallet action).
+    const session: SessionRecord = { ...this.requireSession(input.sessionId), balances: [] as AssetBalance[],
+      balanceSource: "none" as PurchaseView["balanceSource"], balanceError: null,
+      walletAddress: null, plan: null, swapApproval: null, state: "OFFER_SELECTED" as PurchaseState };
     const excluded = this.excludedOffers.get(session.id);
     const offer = session.offers.find((item) => item.id === input.offerId) ?? excluded?.get(input.offerId);
     if (!offer) throw new Error("That product is no longer in this search. Search again.");
@@ -171,7 +180,9 @@ export class ShoppingService {
       ? (input.signatureAvailable ? "available" : "unavailable")
       : "disabled";
     session.snapshot = payableFromOffer(offer, session.quantity);
+    this.sessions.set(session.id, session);
     await this.loadBalances(session, input.address);
+    if (this.sessions.get(session.id) !== session) return this.view(this.requireSession(session.id));
     const fundingMint = input.fundingMint ?? null;
     const planningMinor = knownPlanningMinor(session.snapshot);
     const candidate = this.candidateFor(session.balances, fundingMint);
@@ -202,6 +213,7 @@ export class ShoppingService {
     session.state = this.stateFor(session.plan);
     session.swapApproval = null;
     const prepared = await this.prepareUnsigned(session);
+    if (this.sessions.get(session.id) !== session) return this.view(this.requireSession(session.id));
     session.unsignedTransaction = prepared.status;
     session.transactionVersion = prepared.version;
     if (prepared.status === "prepared" && session.state === "SWAP_QUOTE_READY") {
