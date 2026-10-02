@@ -84,6 +84,8 @@ export interface PurchaseView {
   assets: AssetView[];
   cardRail: {
     availability: "not_connected" | "unavailable" | "ready";
+    access: "not_connected" | "sandbox_not_configured" | "sandbox_blocked" | "sandbox_configured" | "sandbox_live";
+    preferredProvider: string | null;
     message: string;
   };
   product: {
@@ -93,8 +95,12 @@ export interface PurchaseView {
     source: "shopify" | "ebay";
   };
   swapApproval: { at: string; executed: false } | null;
-  paymentStatus: "not_authorized";
-  orderStatus: "not_created";
+  purchaseApproval: "required" | "approved" | "expired";
+  paymentStatus: "PAYMENT_NOT_READY" | "PAYMENT_READY" | "PAYMENT_APPROVAL_REQUIRED" | "PAYMENT_PENDING" | "PAYMENT_AUTHORIZED" | "PAYMENT_CAPTURED" | "PAYMENT_FAILED" | "PAYMENT_REVERSED" | "REFUND_PENDING" | "PAYMENT_REFUNDED";
+  orderStatus: "ORDER_NOT_CREATED" | "ORDER_PENDING" | "ORDER_CONFIRMED" | "ORDER_EXCEPTION";
+  unsignedTransaction: "not_requested" | "prepared";
+  amountKind: "planning_amount";
+  finalTotal: "unknown";
   financialExecution: "disabled";
 }
 
@@ -124,6 +130,6 @@ export interface HealthView {
   ebay: "configured" | "not_configured";
   solana: "available" | "unavailable";
   dflow: "not_configured" | "available" | "authenticated" | "live_quote" | "unavailable";
-  cardRail: "not_connected";
+  cardRail: "not_connected" | "sandbox_not_configured" | "sandbox_blocked" | "sandbox_configured" | "sandbox_live";
   financialExecution: "disabled";
 }

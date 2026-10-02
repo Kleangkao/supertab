@@ -1,6 +1,9 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { mapBridgeCardEvent, verifyIssuingWebhook } from "../src/lib/bridge-events";
+import { BridgeCardRail, describeSolanaFundingBinding } from "../src/lib/bridge-rail";
 import { emptyConstraints, mergeConstraints, resolveConstraints } from "../src/lib/constraints";
-import { parseDflowOrder, priceImpactPercentLabel, QUOTE_FRESHNESS_MS } from "../src/lib/dflow";
+import { fetchDflowOrder, parseDflowOrder, priceImpactPercentLabel, QUOTE_FRESHNESS_MS } from "../src/lib/dflow";
 import { normalizeEbaySummaries, searchEbay } from "../src/lib/ebay";
 import { broadcastTransaction, executeCardPayment, executeSwap } from "../src/lib/execution";
 import { classifyOffers } from "../src/lib/filter-offers";
@@ -9,12 +12,15 @@ import { formatMinor, usdMinorToUsdcBase } from "../src/lib/money";
 import { payableFromOffer, type NormalizedOffer } from "../src/lib/offers";
 import { transitionPurchase } from "../src/lib/purchase";
 import { assertPaymentCanStart, UnavailablePaymentRail } from "../src/lib/card-rail";
+import { capturedPaymentIsNotAnOrder } from "../src/lib/payment-lifecycle";
+import { assertPurchasePayable, createPurchaseIntent } from "../src/lib/purchase-intent";
 import { paymentDoesNotProveOrder } from "../src/lib/order-evidence";
 import { normalizeShopifyProducts, searchShopify } from "../src/lib/shopify";
 import { toOfferView } from "../src/lib/serialize";
 import { buildHealth } from "../src/lib/health";
 import { readConfig } from "../src/lib/config";
-import { parseTokenAccounts } from "../src/lib/wallet";
+import { createReadOnlyWallet, parseTokenAccounts } from "../src/lib/wallet";
+import { connectStandardWallet, discoverStandardWallets } from "../src/lib/wallet-standard";
 import { JUP_MINT, USDC_MINT, WSOL_MINT, sampleSpendingAssets } from "../src/lib/tokens";
 import { extractConstraintPatch, extractOutputText } from "../src/lib/gemini";
 import { configStamp, ShoppingService } from "../src/lib/shopping";
@@ -274,7 +280,7 @@ describe("configuration reporting", () => {
     expect(health.dflow).toBe("live_quote");
     expect(health.ebay).toBe("not_configured");
     expect(health.shopify).toBe("configured");
-    expect(health.cardRail).toBe("not_connected");
+    expect(health.cardRail).toBe("sandbox_blocked");
     expect(health.financialExecution).toBe("disabled");
     const text = JSON.stringify(health);
     expect(text).not.toContain(secret);
@@ -456,13 +462,15 @@ describe("shopping flow", () => {
     expect(reviewed.purchase?.funding?.quoteFreshness).toBe("live");
     expect(reviewed.purchase?.funding?.fundable).toBe(true);
     expect(reviewed.purchase?.state).toBe("SWAP_QUOTE_READY");
-    expect(reviewed.purchase?.cardRail.availability).toBe("not_connected");
+    expect(reviewed.purchase?.cardRail.access).toBe("sandbox_blocked");
     expect(JSON.stringify(reviewed)).not.toContain("transaction");
     const approved = await service.approve(reviewed.sessionId);
     expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
-    expect(approved.purchase?.orderStatus).toBe("not_created");
-    expect(approved.purchase?.paymentStatus).toBe("not_authorized");
+    expect(approved.purchase?.orderStatus).toBe("ORDER_NOT_CREATED");
+    expect(approved.purchase?.paymentStatus).toBe("PAYMENT_APPROVAL_REQUIRED");
+    expect(approved.purchase?.unsignedTransaction).toBe("not_requested");
+    expect(approved.purchase?.finalTotal).toBe("unknown");
   });
 
   it("keeps purchase review available when DFlow fails", async () => {
@@ -483,8 +491,137 @@ describe("shopping flow", () => {
     });
     expect(reviewed.purchase?.funding?.deficit).toBe("66.5 USDC");
     expect(reviewed.purchase?.funding?.quoteFreshness).toBe("missing");
-    expect(reviewed.purchase?.cardRail.availability).toBe("not_connected");
+    expect(reviewed.purchase?.cardRail.access).toBe("sandbox_blocked");
     expect(reviewed.purchase?.financialExecution).toBe("disabled");
+  });
+});
+
+describe("purchase approval and Bridge card events", () => {
+  it("requires an explicit purchase approval and rejects an expired or larger amount", () => {
+    expect(() => createPurchaseIntent({
+      explicitApproval: false,
+      purchaseId: "purchase-1",
+      merchant: "Shop",
+      merchantReference: null,
+      productTitle: "Polo",
+      variant: null,
+      reviewedAmountMinor: 4800n,
+      maximumAuthorizedAmountMinor: 4800n,
+      currency: "USD",
+      approvedAtMs: 1_000,
+      expiresAtMs: 2_000,
+      fundingPlanReference: null,
+    })).toThrow(/not been approved/i);
+    const intent = createPurchaseIntent({
+      explicitApproval: true,
+      purchaseId: "purchase-1",
+      merchant: "Shop",
+      merchantReference: "https://shop.example/polo",
+      productTitle: "Polo",
+      variant: "Navy",
+      reviewedAmountMinor: 4800n,
+      maximumAuthorizedAmountMinor: 4800n,
+      currency: "usd",
+      approvedAtMs: 1_000,
+      expiresAtMs: 61_000,
+      fundingPlanReference: "funding:4800",
+    });
+    expect(intent.cardRailProvider).toBe("bridge");
+    assertPurchasePayable(intent, 4800n, 2_000);
+    expect(() => assertPurchasePayable(null, 4800n, 2_000)).toThrow(/wallet allowance/i);
+    expect(() => assertPurchasePayable(intent, 4801n, 2_000)).toThrow(/ceiling/i);
+    expect(() => assertPurchasePayable(intent, 4800n, 61_000)).toThrow(/expired/i);
+  });
+
+  it("keeps a blocked Bridge rail from executing and separates capture from the merchant order", () => {
+    const rail = new BridgeCardRail(readConfig({ BRIDGE_API_KEY: "", BRIDGE_API_BASE_URL: "https://api.bridge.xyz" }));
+    expect(rail.status().access).toBe("sandbox_blocked");
+    expect(rail.status().message).toMatch(/Production Bridge is disabled/);
+    expect(describeSolanaFundingBinding().execution).toBe("disabled");
+    expect(() => rail.preparePayment()).toThrow(/disabled/i);
+    expect(() => assertPaymentCanStart(rail)).toThrow(/cannot start/i);
+    const authorized = mapBridgeCardEvent({
+      id: "evt_auth",
+      type: "issuing_authorization.updated",
+      data: { object: { id: "iauth_1", object: "issuing.authorization", approved: true, status: "closed", amount: 114 } },
+    });
+    const captured = mapBridgeCardEvent({
+      type: "issuing_transaction.created",
+      data: { object: { id: "ipi_1", object: "issuing.transaction", type: "capture" } },
+    });
+    const refunded = mapBridgeCardEvent({
+      type: "issuing_transaction.created",
+      data: { object: { id: "ipi_2", object: "issuing.transaction", type: "refund" } },
+    });
+    const reversed = mapBridgeCardEvent({
+      object: "issuing.authorization",
+      id: "iauth_2",
+      status: "reversed",
+      approved: true,
+    });
+    expect(authorized.payment).toBe("PAYMENT_AUTHORIZED");
+    expect(captured.payment).toBe("PAYMENT_CAPTURED");
+    expect(refunded.payment).toBe("PAYMENT_REFUNDED");
+    expect(reversed.payment).toBe("PAYMENT_REVERSED");
+    expect(captured.order).toBe("ORDER_NOT_CREATED");
+    expect(capturedPaymentIsNotAnOrder(captured.payment, captured.order)).toBe(true);
+    const payload = JSON.stringify({ type: "issuing_authorization.created" });
+    const secret = "whsec_test_only";
+    const timestamp = "1700000000";
+    const signature = createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
+    expect(verifyIssuingWebhook({ payload, signatureHeader: `t=${timestamp},v1=${signature}`, secret, nowSec: 1700000000 })).toBe(true);
+    expect(verifyIssuingWebhook({ payload, signatureHeader: `t=${timestamp},v1=deadbeef`, secret, nowSec: 1700000000 })).toBe(false);
+    expect(verifyIssuingWebhook({ payload, signatureHeader: null, secret: null })).toBe(false);
+    expect(createReadOnlyWallet({ rpcUrl: "https://rpc.example.test", customRpc: false }).requestSignature().status).toBe("disabled");
+  });
+
+  it("prepares an unsigned DFlow transaction without returning the payload", async () => {
+    const secretPayload = "UNSIGNED_TRANSACTION_PAYLOAD";
+    const quote = await fetchDflowOrder({
+      inputMint: WSOL_MINT,
+      outputMint: USDC_MINT,
+      amount: 1000n,
+      userPublicKey: "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg",
+    }, {
+      baseUrl: "https://dflow.test",
+      fetchImpl: (input) => {
+        const url = new URL(String(input));
+        expect(url.searchParams.get("userPublicKey")).toBe("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg");
+        return Promise.resolve(Response.json({
+          inputMint: WSOL_MINT,
+          inAmount: "1000",
+          outputMint: USDC_MINT,
+          outAmount: "200",
+          otherAmountThreshold: "190",
+          slippageBps: 50,
+          priceImpactPct: "0",
+          transaction: secretPayload,
+        }));
+      },
+    });
+    expect(quote.transactionPresent).toBe(true);
+    expect(Object.values(quote).join(" ")).not.toContain(secretPayload);
+  });
+
+  it("connects a standard wallet account without requesting a signature", async () => {
+    let signed = false;
+    const target = new EventTarget();
+    target.addEventListener("wallet-standard:app-ready", ((event: Event) => {
+      const register = (event as CustomEvent<{ register: (wallet: unknown) => void }>).detail.register;
+      register({
+        name: "Test Wallet",
+        accounts: [],
+        features: {
+          "standard:connect": { connect: async () => ({ accounts: [{ address: "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg" }] }) },
+          "solana:signTransaction": { signTransaction: () => { signed = true; } },
+        },
+      });
+    }) as EventListener);
+    const [wallet] = discoverStandardWallets(target);
+    const connected = await connectStandardWallet(wallet!);
+    expect(connected.address).toBe("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg");
+    expect(connected.canRequestSignature).toBe(true);
+    expect(signed).toBe(false);
   });
 });
 

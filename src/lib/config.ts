@@ -15,6 +15,9 @@ export interface AppConfig {
   dflowBaseUrl: string;
   dflowApiKey: string | null;
   dflowSlippageBps: number;
+  bridgeApiKey: string | null;
+  bridgeApiBaseUrl: string;
+  bridgeWebhookSecret: string | null;
 }
 
 const PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com";
@@ -41,6 +44,9 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     dflowBaseUrl: blankToNull(env.DFLOW_QUOTE_BASE_URL) ?? DEFAULT_DFLOW,
     dflowApiKey: blankToNull(env.DFLOW_API_KEY),
     dflowSlippageBps: Number.isInteger(slippage) && slippage >= 0 && slippage <= 10_000 ? slippage : 50,
+    bridgeApiKey: blankToNull(env.BRIDGE_API_KEY),
+    bridgeApiBaseUrl: blankToNull(env.BRIDGE_API_BASE_URL) ?? "https://api.sandbox.bridge.xyz",
+    bridgeWebhookSecret: blankToNull(env.BRIDGE_WEBHOOK_SECRET),
   };
 }
 

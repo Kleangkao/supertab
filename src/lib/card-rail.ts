@@ -1,14 +1,17 @@
 export type RailAvailability = "not_connected" | "unavailable" | "ready";
+export type CardRailAccess = "not_connected" | "sandbox_not_configured" | "sandbox_blocked" | "sandbox_configured" | "sandbox_live";
 
 export interface PaymentRailStatus {
   providerId: string | null;
+  preferredProvider: string | null;
   availability: RailAvailability;
+  access: CardRailAccess;
   countryEligibility: "unknown";
   kycRequired: "unknown";
   supportedChain: null;
   supportedFundingAsset: "USDC on Solana" | null;
   cardStatus: "not_issued";
-  spendingAvailable: false;
+  spendingAvailable: boolean;
   message: string;
 }
 
@@ -24,7 +27,9 @@ export class UnavailablePaymentRail implements PaymentRail {
   status(): PaymentRailStatus {
     return {
       providerId: null,
+      preferredProvider: null,
       availability: "not_connected",
+      access: "not_connected",
       countryEligibility: "unknown",
       kycRequired: "unknown",
       supportedChain: null,

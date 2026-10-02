@@ -1,3 +1,4 @@
+import { bridgeAccess } from "./bridge-rail";
 import type { AppConfig } from "./config";
 import type { HealthView } from "./view";
 
@@ -16,7 +17,7 @@ export async function buildHealth(
     ebay: config.ebayClientId && config.ebayClientSecret ? "configured" : "not_configured",
     solana,
     dflow,
-    cardRail: "not_connected",
+    cardRail: bridgeAccess(config).access,
     financialExecution: "disabled",
   };
 }

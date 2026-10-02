@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { connectStandardWallet, discoverStandardWallets, type StandardWallet } from "@/lib/wallet-standard";
 import type { HealthView, OfferView, SessionView } from "@/lib/view";
 
 const EMPTY_HEALTH: HealthView = {
@@ -10,7 +11,7 @@ const EMPTY_HEALTH: HealthView = {
   ebay: "not_configured",
   solana: "unavailable",
   dflow: "unavailable",
-  cardRail: "not_connected",
+  cardRail: "sandbox_blocked",
   financialExecution: "disabled",
 };
 
@@ -23,6 +24,8 @@ export function ShopApp() {
   const [walletMode, setWalletMode] = useState<"none" | "sample" | "address">("none");
   const [address, setAddress] = useState("");
   const [fundingMint, setFundingMint] = useState<string | null>(null);
+  const [browserWallet, setBrowserWallet] = useState<StandardWallet | null>(null);
+  const [canRequestSignature, setCanRequestSignature] = useState(false);
 
   useEffect(() => {
     void fetch("/api/health").then(async (response) => {
@@ -78,6 +81,49 @@ export function ShopApp() {
     }
   }
 
+  async function connectWallet() {
+    const found = discoverStandardWallets(window)[0] ?? null;
+    setBrowserWallet(found);
+    if (!found) {
+      setError("No Solana wallet was found in this browser.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const connected = await connectStandardWallet(found);
+      setAddress(connected.address);
+      setWalletMode("address");
+      setCanRequestSignature(connected.canRequestSignature);
+      const id = selectedId(session);
+      if (id) await selectOffer(id, "address", connected.address, fundingMint);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The wallet did not connect.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approvePurchase() {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/purchase/intent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: session.sessionId }),
+      });
+      const body = await response.json() as SessionView & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "This purchase was not approved.");
+      setSession(body);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "This purchase was not approved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function approve() {
     if (!session) return;
     setBusy(true);
@@ -116,7 +162,7 @@ export function ShopApp() {
             <Status label="eBay" value={health.ebay} />
             <Status label="Solana" value={health.solana} />
             <Status label="DFlow" value={health.dflow} />
-            <Status label="Payment card" value={health.cardRail} />
+            <Status label="Payment card" value={railLabel(health.cardRail)} />
           </div>
         </header>
 
@@ -192,14 +238,16 @@ export function ShopApp() {
               <Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Unknown"} />
               <Row label="Tax" value={purchase.checkout.taxDisplay ?? "Unknown"} />
               <Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} />
-              <Row label="Merchant total" value={purchase.checkout.merchantTotalDisplay ?? "Not available yet"} />
+              <Row label="Planning amount" value={purchase.funding?.planningDisplay ?? "Unknown"} />
+              <Row label="Final checkout total" value={purchase.finalTotal === "unknown" ? "Unknown" : purchase.checkout.merchantTotalDisplay ?? "Unknown"} />
               <Row label="Currency" value={purchase.checkout.currency ?? "Unknown"} />
               <p className="mt-2 text-stone-500">{purchase.checkout.note}</p>
             </Block>
             <Block title="Your spending assets">
               <div className="mb-3 flex flex-wrap gap-2">
-                <button type="button" className={chip(walletMode === "sample")} onClick={() => { setWalletMode("sample"); const id = selectedId(session); if (id) void selectOffer(id, "sample", address, fundingMint); }}>Sample preview</button>
-                <button type="button" className={chip(walletMode === "address")} onClick={() => setWalletMode("address")}>Use an address</button>
+                <button type="button" className={chip(walletMode === "sample")} onClick={() => { setWalletMode("sample"); setCanRequestSignature(false); const id = selectedId(session); if (id) void selectOffer(id, "sample", address, fundingMint); }}>Sample preview</button>
+                <button type="button" className={chip(walletMode === "address" && !canRequestSignature)} onClick={() => setWalletMode("address")}>Use an address</button>
+                <button type="button" className={chip(canRequestSignature)} onClick={() => void connectWallet()} disabled={busy}>{browserWallet ? `Connect ${browserWallet.name}` : "Connect wallet"}</button>
               </div>
               {walletMode === "sample" ? <p className="mb-2 text-amber-800">Sample preview. These are not your assets.</p> : null}
               {walletMode === "address" ? (
@@ -208,6 +256,7 @@ export function ShopApp() {
                   <button className="rounded-xl bg-stone-900 px-3 py-2 text-white" type="submit">Look up</button>
                 </form>
               ) : null}
+              <p className="mb-2 text-stone-500">Signature: {canRequestSignature ? "Available, not requested" : "Disabled"}</p>
               {purchase.balanceError ? <p className="text-amber-800">{purchase.balanceError}</p> : null}
               {purchase.assets.length === 0 ? <p className="text-stone-500">No spending assets loaded.</p> : (
                 <ul className="space-y-1">
@@ -249,6 +298,7 @@ export function ShopApp() {
                   <Row label="Still needed" value={purchase.funding.deficit} />
                   <Row label="Funding asset" value={purchase.funding.candidateSymbol ?? "None selected"} />
                   <Row label="DFlow quote" value={quoteLabel(purchase.funding.quoteFreshness)} />
+                  <Row label="Unsigned transaction" value={purchase.unsignedTransaction === "prepared" ? "Prepared, awaiting approval" : "Not requested"} />
                   <Row label="Amount to convert" value={purchase.funding.requiredInput ?? "Not quoted"} />
                   <Row label="Expected USDC" value={purchase.funding.expectedOutput ?? "Not quoted"} />
                   <Row label="Price impact" value={purchase.funding.priceImpact ?? "Not reported"} />
@@ -262,12 +312,15 @@ export function ShopApp() {
               ) : <p>Funding has not been calculated.</p>}
             </Block>
             <Block title="Payment rail">
-              <Row label="Status" value={purchase.cardRail.availability === "not_connected" ? "Provider not connected" : purchase.cardRail.availability} />
+              <Row label="Preferred provider" value={purchase.cardRail.preferredProvider ?? "None"} />
+              <Row label="Status" value={railLabel(purchase.cardRail.access)} />
               <p className="mt-2 text-stone-600">{purchase.cardRail.message}</p>
+              <p className="mt-2 text-stone-500">No card number is shown. Financial execution is disabled.</p>
             </Block>
             <Block title="Financial actions">
-              <Row label="Payment" value="Not authorized" />
-              <Row label="Order" value="Not created" />
+              <Row label="This purchase" value={purchase.purchaseApproval === "approved" ? "Approved" : purchase.purchaseApproval === "expired" ? "Expired" : "Approval required"} />
+              <Row label="Payment" value={purchase.paymentStatus.replaceAll("_", " ").toLowerCase()} />
+              <Row label="Order" value={purchase.orderStatus.replaceAll("_", " ").toLowerCase()} />
               <Row label="Purchase state" value={purchase.state.replaceAll("_", " ").toLowerCase()} />
               {purchase.swapApproval ? <p className="mt-2 text-stone-600">Approval recorded {purchase.swapApproval.at}. Nothing was swapped.</p> : null}
               {purchase.state === "SWAP_QUOTE_READY" || purchase.state === "AWAITING_SWAP_APPROVAL" ? (
@@ -275,7 +328,10 @@ export function ShopApp() {
                   Approve conversion
                 </button>
               ) : null}
-              <p className="mt-2 text-stone-500">Approving records your intent only. SuperTab will not sign, swap, or pay.</p>
+              <button type="button" onClick={() => void approvePurchase()} disabled={busy || purchase.purchaseApproval === "approved"} className="mt-3 w-full rounded-full border border-stone-300 px-4 py-2 disabled:opacity-50">
+                Approve this purchase
+              </button>
+              <p className="mt-2 text-stone-500">Approving records this purchase only. SuperTab will not sign, swap, or pay.</p>
             </Block>
           </div>
         )}
@@ -334,6 +390,14 @@ function stockLabel(availability: OfferView["availability"]): string {
   if (availability === "in_stock") return "In stock";
   if (availability === "out_of_stock") return "Out of stock";
   return "Stock unknown";
+}
+
+function railLabel(access: string): string {
+  if (access === "sandbox_live") return "Sandbox live";
+  if (access === "sandbox_blocked") return "Sandbox blocked";
+  if (access === "sandbox_configured") return "Sandbox configured";
+  if (access === "sandbox_not_configured") return "Sandbox not configured";
+  return "Provider not connected";
 }
 
 function quoteLabel(freshness: string): string {

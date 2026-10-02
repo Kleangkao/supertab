@@ -1,12 +1,15 @@
 import { readConfig, type AppConfig } from "./config";
 import { buildSearchQuery, describeConstraints, emptyConstraints, resolveConstraints, type ConstraintPatch, type ShoppingConstraints } from "./constraints";
-import { bindQuote, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
+import { bindQuote, fetchDflowOrder, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
 import { searchEbay } from "./ebay";
 import { knownPlanningMinor, planFunding, quoteIsUsable, type BoundQuote, type FundingPlan } from "./funding-planner";
 import { payableFromOffer, type NormalizedOffer, type PayableSnapshot } from "./offers";
 import { classifyOffers } from "./filter-offers";
 import { transitionPurchase, type PurchaseState } from "./purchase";
-import { UnavailablePaymentRail, type PaymentRailStatus } from "./card-rail";
+import { BridgeCardRail } from "./bridge-rail";
+import type { PaymentRailStatus } from "./card-rail";
+import { createPurchaseIntent, type PurchaseIntent } from "./purchase-intent";
+import { paymentStateFor, type OrderState } from "./payment-lifecycle";
 import { searchShopify } from "./shopify";
 import { extractConstraintPatch, GeminiBusyError } from "./gemini";
 import {
@@ -52,14 +55,18 @@ interface SessionRecord {
   plan: FundingPlan | null;
   state: PurchaseState;
   swapApproval: { at: string; executed: false } | null;
+  purchaseIntent: PurchaseIntent | null;
+  unsignedTransaction: "not_requested" | "prepared";
 }
 
 export class ShoppingService {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly turns = new Map<string, Promise<SessionView>>();
-  private readonly rail = new UnavailablePaymentRail();
+  private readonly rail: BridgeCardRail;
 
-  constructor(private readonly deps: ShoppingDependencies) {}
+  constructor(private readonly deps: ShoppingDependencies) {
+    this.rail = new BridgeCardRail(deps.config);
+  }
 
   async converse(sessionId: string | null, message: string): Promise<SessionView> {
     const text = message.trim();
@@ -150,6 +157,8 @@ export class ShoppingService {
       throw new Error("That listing misses a requirement, so it cannot be selected.");
     }
     session.selectedOfferId = offer.id;
+    session.purchaseIntent = null;
+    session.unsignedTransaction = "not_requested";
     session.quantity = input.quantity && input.quantity > 0 && input.quantity <= 20 ? input.quantity : 1;
     session.walletMode = input.walletMode;
     session.snapshot = payableFromOffer(offer, session.quantity);
@@ -198,7 +207,58 @@ export class ShoppingService {
       session.state = transitionPurchase(session.state, "AWAITING_SWAP_APPROVAL");
     }
     session.swapApproval = { at: new Date(this.nowMs()).toISOString(), executed: false };
+    session.unsignedTransaction = await this.prepareUnsigned(session);
     return this.view(session);
+  }
+
+  async approvePurchase(sessionId: string): Promise<SessionView> {
+    const session = this.requireSession(sessionId);
+    const offer = this.selectedOffer(session);
+    const amount = session.snapshot ? knownPlanningMinor(session.snapshot) : null;
+    if (!offer || amount == null) throw new Error("There is no reviewed amount to approve.");
+    const now = this.nowMs();
+    session.purchaseIntent = createPurchaseIntent({
+      explicitApproval: true,
+      purchaseId: session.id,
+      merchant: offer.merchant,
+      merchantReference: offer.productUrl,
+      productTitle: offer.title,
+      variant: offer.variantLabel,
+      reviewedAmountMinor: amount,
+      maximumAuthorizedAmountMinor: amount,
+      currency: session.snapshot?.currency ?? "USD",
+      approvedAtMs: now,
+      expiresAtMs: now + 15 * 60 * 1000,
+      fundingPlanReference: session.plan ? `funding:${amount.toString()}` : null,
+    });
+    return this.view(session);
+  }
+
+  private selectedOffer(session: SessionRecord): NormalizedOffer | null {
+    if (!session.selectedOfferId) return null;
+    return session.offers.find((item) => item.id === session.selectedOfferId)
+      ?? this.excludedOffers.get(session.id)?.get(session.selectedOfferId)
+      ?? null;
+  }
+
+  private async prepareUnsigned(session: SessionRecord): Promise<"not_requested" | "prepared"> {
+    if (!session.walletAddress || !session.quote) return "not_requested";
+    try {
+      const prepared = await fetchDflowOrder({
+        inputMint: session.quote.inputMint,
+        outputMint: session.quote.outputMint,
+        amount: session.quote.inAmount,
+        userPublicKey: session.walletAddress,
+      }, {
+        baseUrl: this.deps.config.dflowBaseUrl,
+        apiKey: this.deps.config.dflowApiKey ?? undefined,
+        slippageBps: this.deps.config.dflowSlippageBps,
+        fetchImpl: this.deps.fetchImpl,
+      });
+      return prepared.transactionPresent ? "prepared" : "not_requested";
+    } catch {
+      return "not_requested";
+    }
   }
 
   private async quoteDeficit(
@@ -362,7 +422,12 @@ export class ShoppingService {
         balanceSource: session.balanceSource,
         balanceError: session.balanceError,
         assets: session.balances.map(toAssetView),
-        cardRail: { availability: rail.availability, message: rail.message },
+        cardRail: {
+          availability: rail.availability,
+          access: rail.access,
+          preferredProvider: rail.preferredProvider,
+          message: rail.message,
+        },
         product: {
           title: (session.offers.find((item) => item.id === session.selectedOfferId) ?? [...(this.excludedOffers.get(session.id)?.values() ?? [])].find((item) => item.id === session.selectedOfferId))?.title ?? "Selected product",
           merchant: (session.offers.find((item) => item.id === session.selectedOfferId))?.merchant ?? null,
@@ -370,8 +435,17 @@ export class ShoppingService {
           source: (session.offers.find((item) => item.id === session.selectedOfferId))?.source ?? "shopify",
         },
         swapApproval: session.swapApproval,
-        paymentStatus: "not_authorized",
-        orderStatus: "not_created",
+        purchaseApproval: approvalLabel(session.purchaseIntent, this.nowMs()),
+        paymentStatus: paymentStateFor({
+          hasOffer: true,
+          approved: session.purchaseIntent != null,
+          expired: session.purchaseIntent != null && this.nowMs() >= Date.parse(session.purchaseIntent.expiresAt),
+          railReady: rail.availability === "ready" && rail.spendingAvailable,
+        }),
+        orderStatus: "ORDER_NOT_CREATED" satisfies OrderState,
+        unsignedTransaction: session.unsignedTransaction,
+        amountKind: "planning_amount",
+        finalTotal: "unknown",
         financialExecution: "disabled",
       } : null,
     };
@@ -400,7 +474,14 @@ function emptySession(id: string): SessionRecord {
     plan: null,
     state: "DISCOVERING",
     swapApproval: null,
+    purchaseIntent: null,
+    unsignedTransaction: "not_requested",
   };
+}
+
+function approvalLabel(intent: PurchaseIntent | null, nowMs: number): "required" | "approved" | "expired" {
+  if (!intent) return "required";
+  return nowMs >= Date.parse(intent.expiresAt) ? "expired" : "approved";
 }
 
 function assistantCopy(input: {
@@ -439,6 +520,7 @@ export function configStamp(config: AppConfig): string {
     config.dflowApiKey ? "dflow" : "",
     config.solanaRpcCustom ? "rpc" : "",
     config.geminiModel,
+    config.bridgeApiKey ? "bridge" : "",
     config.dflowBaseUrl,
     config.ebayEnvironment,
   ].join("|");
