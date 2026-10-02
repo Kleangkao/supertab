@@ -61,7 +61,7 @@ npm run build
 npm run dev
 ```
 
-`SUPERTAB_LIVE=1 npm test` also requests one real DFlow quote.
+`SUPERTAB_LIVE=1 npm test` also requests one real DFlow quote and reads one public Solana address. Neither call signs or broadcasts.
 
 ## Safety
 
