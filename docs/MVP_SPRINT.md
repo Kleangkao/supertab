@@ -45,3 +45,9 @@ A fresh-session regression proved that approvePurchase previously marked a catal
 5. Submission: honest capability matrix, reliable presenter flow, responsive browser verification and screenshots after core gaps are addressed.
 
 The largest remaining product gap is a verified final merchant checkout amount. The local rehearsal proves application lifecycle rules only; it does not close that gap or prove spending readiness.
+
+## Payment-event reliability cycle
+
+Added a provider-neutral, side-effect-free payment evidence ledger and integrated it into the existing local rehearsal. It binds purchase, amount, currency and live/sandbox/local mode, deduplicates event IDs and rejects conflicting duplicate evidence. Capture and refund do not regress when authorization or capture arrive late; early refunds can be retried after capture. The ledger has no merchant-order field, so payment events cannot manufacture order confirmation. Full-amount USD only; partial financial lifecycle accounting remains unsupported.
+
+50 deterministic tests, typecheck, lint and production build pass. Browser verification exercised approval, authorization, capture, duplicate capture and delayed authorization, then refund followed by both replays. Capture and refund stayed recorded and merchant order stayed uncreated. No provider event ingestion endpoint or financial execution was enabled. Authentication and durable atomic storage remain required before provider integration.

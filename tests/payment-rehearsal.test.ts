@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { advanceRehearsal, startRehearsal } from "../src/lib/payment-rehearsal";
 
 describe("isolated local payment rehearsal", () => {
+  it("uses the payment ledger when duplicate and delayed fixture events arrive", () => {
+    let state = startRehearsal(4800n);
+    for (const action of ["approve", "authorize", "capture", "replay_capture", "late_authorization"] as const) state = advanceRehearsal(state, action);
+    expect(state.payment).toBe("PAYMENT_CAPTURED");
+    expect(state.order).toBe("ORDER_NOT_CREATED");
+    expect(Object.keys(state.ledger!.events)).toHaveLength(2);
+    state = advanceRehearsal(state, "refund");
+    expect(advanceRehearsal(state, "replay_capture").payment).toBe("PAYMENT_REFUNDED");
+    expect(advanceRehearsal(state, "late_authorization").payment).toBe("PAYMENT_REFUNDED");
+  });
   it("requires approval and authorization before capture and separate evidence before an order", () => {
     const initial = startRehearsal(4800n);
     expect(() => advanceRehearsal(initial, "authorize")).toThrow();

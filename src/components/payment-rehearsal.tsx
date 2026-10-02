@@ -17,10 +17,12 @@ export function PaymentRehearsal() {
       {state.payment === "PAYMENT_AUTHORIZED" && <button onClick={() => act("capture")}>Simulate capture</button>}
       {state.payment === "PAYMENT_CAPTURED" && <>{state.order === "ORDER_NOT_CREATED" && <button onClick={() => act("confirm_order")}>Add simulated merchant receipt</button>}<button onClick={() => act("refund")}>Simulate refund</button></>}
       {state.events.length > 0 && <button onClick={() => setState(startRehearsal(4800n))}>Reset rehearsal</button>}
+      {(state.payment === "PAYMENT_CAPTURED" || state.payment === "PAYMENT_REFUNDED") && <><button onClick={() => act("replay_capture")}>Replay capture event</button><button onClick={() => act("late_authorization")}>Send delayed authorization</button></>}
     </div>
     {state.payment === "PAYMENT_AUTHORIZED" && <p>Authorization reserves purchasing power in this simulation. Capture has not happened.</p>}
     {state.payment === "PAYMENT_CAPTURED" && state.order === "ORDER_NOT_CREATED" && <p>Simulated capture is recorded. A merchant order still needs separate evidence.</p>}
     {state.orderReference && <p>Fixture evidence: {state.orderReference}. No real order exists.</p>}
+    {state.events.some(event => event === "replay_capture" || event === "late_authorization") && <p>Repeated and delayed fixture events preserve the recorded payment stage. They do not create merchant order evidence.</p>}
     {state.events.length > 0 && <details><summary>Rehearsal event history</summary><ol>{state.events.map((event, index) => <li key={index}>{event.replaceAll("_", " ")}</li>)}</ol></details>}
   </section>;
 }

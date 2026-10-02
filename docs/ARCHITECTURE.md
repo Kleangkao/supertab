@@ -26,6 +26,14 @@ Amounts are bigint minor units. USDC is recognized only by mint `EPjFWdd5AufqSSq
 
 Purchase states move through checkout, funding, and an optional quote. If USDC already covers the known amount, the state becomes `PAYMENT_RAIL_UNAVAILABLE`. A live quote can reach `SWAP_QUOTE_READY` and then `AWAITING_SWAP_APPROVAL`. Approval does not enter `SWAP_PENDING`.
 
-`UnavailablePaymentRail` is the only rail. `PAYMENT_CONFIRMED` cannot become `ORDER_CONFIRMED`. An order requires separate merchant-order evidence.
+`BridgeCardRail` implements the provider-neutral rail interface and currently reports unavailable sandbox access. Its payment preparation throws while execution is disabled. Purchase intents obtain the provider ID from the selected adapter. `PAYMENT_CONFIRMED` cannot become `ORDER_CONFIRMED`. An order requires separate merchant-order evidence.
 
 The known price used for planning is a catalog or listing price unless a future checkout integration supplies a merchant total.
+
+Purchase approval requires a known final merchant total, independently of conversion quote review. Payment readiness requires current approval, that final total, real chain USDC coverage and a ready rail. Sample balances and a conversion quote cannot satisfy funds readiness.
+
+## Payment evidence and local rehearsal
+
+`payment-ledger.ts` is a pure reducer for full-amount USD payment evidence. It binds every event to a purchase, currency, amount and evidence mode. Identical event IDs are idempotent; reusing an ID for different evidence is rejected. Capture can arrive before authorization without being downgraded when authorization arrives later. Refund requires capture evidence and leaves an early refund available for retry; delayed earlier events cannot undo a recorded refund. Partial authorizations, captures and refunds are not supported and are rejected by amount matching.
+
+The ledger does not authenticate providers, submit payments, confirm merchant orders or persist state across server restarts. A future provider boundary must authenticate events, resolve provider references to the correct purchase, persist the ledger atomically, and reconcile rejected/out-of-order events. The current application uses it in `payment-rehearsal.ts` with local fixtures only. Browser controls can replay capture and delayed authorization to demonstrate non-regression. Those events never modify the real shopping session or rail status.
