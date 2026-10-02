@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
-import { connectStandardWallet, discoverStandardWallets } from "@/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, type StandardWallet } from "@/lib/wallet-standard";
 import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
 
 // An explicit convenience for this demo session, never an application wallet default.
@@ -22,6 +22,7 @@ export function ShopApp() {
   const [address, setAddress] = useState("");
   const [showAddressInput, setShowAddressInput] = useState(false);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
+  const [walletChoices, setWalletChoices] = useState<StandardWallet[]>([]);
   const [now, setNow] = useState(0);
   const lock = useRef(false);
   const reviewRef = useRef<HTMLElement>(null);
@@ -31,6 +32,7 @@ export function ShopApp() {
   }, [selectedOfferId]);
 
   useEffect(() => {
+    discoverStandardWallets(window);
     const controller = new AbortController();
     void fetch("/api/health", { signal: controller.signal }).then(async response => {
       if (response.ok) setHealth(await response.json() as HealthView);
@@ -90,10 +92,13 @@ export function ShopApp() {
     }
   }
 
-  async function connectWallet() {
+  async function connectWallet(chosen?: StandardWallet) {
     if (lock.current) return;
-    const wallet = discoverStandardWallets(window)[0];
+    const wallets = discoverStandardWallets(window);
+    if (!chosen && wallets.length > 1) { setWalletChoices([...wallets]); return; }
+    const wallet = chosen ?? wallets[0];
     if (!wallet) { setError("No Solana wallet extension was found. Use the real demo wallet in read-only mode instead."); return; }
+    setWalletChoices([]);
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
@@ -136,12 +141,13 @@ export function ShopApp() {
         <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Let’s make a plan.</h2><span className="badge">Purchase review</span></div>
         <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
         <div className="price-summary"><span>Item {purchase.checkout.itemKind === "catalog" ? "catalog" : "listing"} price</span><strong>{purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · final total pending</p></div>
-        <div className="notice subtle"><strong>Final checkout total unknown</strong><p>Final shipping and tax need merchant confirmation. This plan includes only the prices currently known.</p></div>
+        <div className="notice subtle"><strong>Final checkout total unknown</strong><p>Final shipping and tax need merchant confirmation. This plan includes only the prices currently known.</p>{selected?.merchantReviewUrl && <a href={selected.merchantReviewUrl} target="_blank" rel="noopener noreferrer">Review price and delivery at the merchant ↗</a>}<p>Opening the merchant page does not approve a purchase or verify its final total in SuperTab.</p></div>
         <details className="review-details"><summary>Price breakdown</summary><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
         <Block step="1" title="Your spending assets"><p className="section-copy">Read your wallet to see how this purchase could be funded.</p>
           <div className="wallet-actions"><button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "address", DEMO_ADDRESS, null)}>Use real demo wallet <span>Read-only</span></button><div className="wallet-options"><button disabled={!!busy} onClick={() => setShowAddressInput(value => !value)}>Enter address</button><button disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button><button disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "sample", "", null)}>Sample preview</button></div></div>
           {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}
           <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
+          {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
           {purchase.walletKind === "sample" && <p className="sample-note">Illustrative balances, not your assets. No transaction is prepared for a sample wallet.</p>}
           {purchase.balanceError && <p className="inline-error" role="alert">We couldn’t read this wallet. {purchase.balanceError}</p>}
           {purchase.assets.length > 0 && <div className="assets">{purchase.assets.filter(asset => asset.isUsdc || asset.kind === "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? "Token"} value={asset.amountDisplay} />)}{purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <details className="review-details"><summary>Other tokens in this wallet</summary>{purchase.assets.filter(asset => !asset.isUsdc && asset.kind !== "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? maskAddress(asset.mint)} value={asset.amountDisplay} />)}<p>Unrecognized tokens are shown by mint address. They have no assumed dollar value or guaranteed conversion route.</p></details>}</div>}

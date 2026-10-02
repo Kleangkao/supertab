@@ -8,6 +8,7 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - Shopify Global Catalog search, which does not need an API secret.
 - eBay Browse search, after `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` are set.
 - A read-only Solana address lookup, plus a clearly labeled sample-asset preview.
+- Wallet Standard discovery handles wallets that register after the page loads, deduplicates extensions and lets the shopper choose between multiple wallets. An empty connection response cannot reuse an old account.
 - A funding plan that uses integer token math.
 - A live DFlow quote from the dev API, without a signature or a broadcast.
 - Real unsigned transaction preparation for a public wallet, with structural format checks. The preparation response supplies the displayed quote; no transaction payload or key is sent to the browser.
@@ -17,6 +18,8 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - A separate local payment rehearsal with explicit approval, authorization, decline, capture, independent simulated order evidence, and refund. It makes no provider calls and uses a fixed $48 fixture rather than the selected product or wallet.
 
 Catalog and listing prices are not merchant checkout totals. Shipping and tax stay unknown unless a provider returns them.
+
+The purchase review links to the provider's merchant cart or product page when an HTTPS link is available. Opening that page does not approve a purchase or import a verified final total. See [checkout access research](docs/CHECKOUT_RESEARCH.md) for authenticated Shopify and restricted eBay checkout requirements.
 
 ## What is not executable
 

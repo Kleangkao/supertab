@@ -61,6 +61,16 @@ export function offerId(source: CommerceSource, sourceItemId: string): string {
   return `${source}:${sourceItemId}`;
 }
 
+/** Provider links are untrusted input. Only ordinary HTTPS merchant pages. */
+export function merchantReviewUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    return url.href;
+  } catch { return null; }
+}
+
 export function summarizeText(value: string | null | undefined, max = 180): string | null {
   if (!value) return null;
   const collapsed = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

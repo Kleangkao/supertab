@@ -1,5 +1,6 @@
 import { formatFixedMinor, formatMinor, formatUsdFromMinor } from "./money";
 import type { NormalizedOffer } from "./offers";
+import { merchantReviewUrl } from "./offers";
 import type { AssetBalance } from "./tokens";
 import type { FundingPlan } from "./funding-planner";
 import { displayUsdc } from "./funding-planner";
@@ -29,6 +30,7 @@ export function toOfferView(offer: NormalizedOffer): OfferView {
     shippingSummary: offer.shipping?.summary ?? null,
     shippingDisplay,
     productUrl: offer.productUrl,
+    merchantReviewUrl: merchantReviewUrl(offer.checkout.kind === "merchant_cart_link" ? offer.checkout.url : offer.productUrl),
     checkoutLabel: offer.checkout.kind === "merchant_cart_link"
       ? offer.checkout.nativeCheckout
         ? "Merchant checkout link"

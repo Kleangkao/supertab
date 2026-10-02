@@ -22,6 +22,16 @@ Real discovery and provider-backed wallet/quote reads remain available in the im
 
 ## Next priorities and verifiable outcomes
 
+### Wallet discovery and merchant review cycle
+
+Fixed the Wallet Standard late-registration callback shape, one registry per browser window, duplicate registration and unregister handling. Connection no longer falls back to an old account when the wallet returns no authorized accounts. Three focused regressions failed before these fixes and pass afterward. Multiple extensions now produce a wallet picker instead of silently selecting the first.
+
+Added an HTTPS merchant-review link to the selected product's cart or product page, with explicit copy that it neither approves nor verifies the total. Official checkout access research is in CHECKOUT_RESEARCH.md. Shopify requires authenticated or signed checkout requests; eBay checkout has additional access approval requirements. Neither catalog search nor a cart estimate has been promoted to final checkout evidence.
+
+44 deterministic tests, typecheck, lint and build pass. Browser verification uses a restarted local server because a previously retained global shopping-service instance did not pick up the new serialized field during hot reload. Real extension signing remains unverified and disabled.
+
+The real merchant link reached True Classic checkout for the exact selected size/quantity. Read-only WebMCP returned an incomplete checkout with matching item amount but missing contact/delivery details and fulfillment groups. This is stronger evidence of the remaining total gap and reveals a browser-backed read path distinct from server API authentication. The browser without a wallet extension correctly showed the read-only fallback, without pretending to connect.
+
 1. Merchant checkout evidence: investigate legitimate provider access, attach an amount to the selected merchant/product/variant/quantity and freshness, and invalidate approval when terms change. Catalog data or a manually entered amount must never claim a verified final total.
 2. Wallet connection reliability: exercise Wallet Standard discovery, account changes, disconnection and refresh. Keep signing disabled and account permissions distinct from purchase approval.
 3. Payment lifecycle integration: provider-neutral event handling, duplicate/out-of-order protection, independent order evidence, then real sandbox evidence if access becomes available. Avoid prolonged onboarding attempts.

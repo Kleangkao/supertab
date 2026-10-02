@@ -17,6 +17,7 @@ export interface OfferView {
   shippingDisplay: string | null;
   productUrl: string | null;
   checkoutLabel: string;
+  merchantReviewUrl: string | null;
   verifiedAt: string;
 }
 
