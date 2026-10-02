@@ -226,9 +226,8 @@ export class ShoppingService {
       session.state = transitionPurchase(session.state, "AWAITING_SWAP_APPROVAL");
     }
     session.swapApproval = { at: new Date(this.nowMs()).toISOString(), executed: false };
-    const prepared = await this.prepareUnsigned(session);
-    session.unsignedTransaction = prepared.status;
-    session.transactionVersion = prepared.version;
+    // Approval records the displayed quote. Preparing again would silently
+    // replace the approved terms; refresh must require a separate review.
     return this.view(session);
   }
 

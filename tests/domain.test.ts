@@ -702,6 +702,7 @@ describe("wallet modes", () => {
     expect(solanaTransactionSummary(tx).valid).toBe(true);
     expect(solanaTransactionSummary("not-a-transaction").valid).toBe(false);
     let sawPublicKey = false;
+    let preparedRequests = 0;
     const service = new ShoppingService({
       config: testConfig(),
       now: () => new Date("2026-04-02T00:00:00.000Z"),
@@ -710,7 +711,7 @@ describe("wallet modes", () => {
         if (url.includes("dflow.test")) {
           const parsed = new URL(url);
           const key = parsed.searchParams.get("userPublicKey");
-          if (key) sawPublicKey = key === publicAddress;
+          if (key) { sawPublicKey = key === publicAddress; preparedRequests++; }
           const amount = parsed.searchParams.get("amount") ?? "1";
           const out = (BigInt(amount) * 1000n).toString();
           return Promise.resolve(Response.json({
@@ -781,7 +782,10 @@ describe("wallet modes", () => {
     expect(connected.purchase?.walletKind).toBe("connected");
     expect(connected.purchase?.signatureCapability).toBe("available");
     expect(connected.purchase?.assets.some((asset) => asset.amountDisplay === "42 USDC")).toBe(false);
+    const requestsBeforeApproval = preparedRequests;
     const approved = await service.approve(connected.sessionId);
+    expect(preparedRequests).toBe(requestsBeforeApproval);
+    expect(approved.purchase?.funding).toEqual(connected.purchase?.funding);
     expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
     expect(approved.purchase?.unsignedTransaction).toBe("prepared");
