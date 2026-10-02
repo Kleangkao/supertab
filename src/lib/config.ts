@@ -5,6 +5,10 @@ export interface AppConfig {
   shopifyCatalogUrl: string;
   shopifyProfile: string;
   shopifyShipTo: string;
+  shopifyCheckoutToken: string | null;
+  shopifyClientId: string | null;
+  shopifyClientSecret: string | null;
+  shopifyCheckoutOrigins: string[];
   ebayClientId: string | null;
   ebayClientSecret: string | null;
   ebayEnvironment: "production" | "sandbox";
@@ -34,6 +38,13 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     shopifyProfile: blankToNull(env.SHOPIFY_UCP_PROFILE)
       ?? "https://shopify.dev/ucp/agent-profiles/2026-04-08/valid-with-capabilities.json",
     shopifyShipTo: (blankToNull(env.SHOPIFY_SHIP_TO_COUNTRY) ?? "US").toUpperCase(),
+    shopifyCheckoutToken: blankToNull(env.SHOPIFY_CHECKOUT_ACCESS_TOKEN),
+    shopifyClientId: blankToNull(env.SHOPIFY_CLIENT_ID),
+    shopifyClientSecret: blankToNull(env.SHOPIFY_CLIENT_SECRET),
+    shopifyCheckoutOrigins: (env.SHOPIFY_CHECKOUT_ALLOWED_ORIGINS ?? "").split(",").map(value => value.trim()).filter(value => {
+      try { const url = new URL(value); return url.protocol === "https:" && url.origin === value && !url.username && !url.password; }
+      catch { return false; }
+    }),
     ebayClientId: blankToNull(env.EBAY_CLIENT_ID),
     ebayClientSecret: blankToNull(env.EBAY_CLIENT_SECRET),
     ebayEnvironment: env.EBAY_ENVIRONMENT === "sandbox" ? "sandbox" : "production",

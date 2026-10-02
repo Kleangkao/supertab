@@ -68,6 +68,7 @@ export interface CheckoutView {
   quantity: number;
   shippingDisplay: string | null;
   taxDisplay: string | null;
+  feeDisplay: string | null;
   discountDisplay: string | null;
   merchantTotalDisplay: string | null;
   currency: string | null;
@@ -75,6 +76,15 @@ export interface CheckoutView {
 }
 
 export interface PurchaseView {
+  termsId: string;
+  checkoutVerification: {
+    status: "unknown" | "verified";
+    readAvailable: boolean;
+    message: string;
+    merchantOrigin: string | null;
+    verifiedAt: string | null;
+    expiresAt: string | null;
+  };
   state: string;
   checkout: CheckoutView;
   funding: FundingView | null;
@@ -103,8 +113,8 @@ export interface PurchaseView {
   paymentStatus: "PAYMENT_NOT_READY" | "PAYMENT_READY" | "PAYMENT_APPROVAL_REQUIRED" | "PAYMENT_PENDING" | "PAYMENT_AUTHORIZED" | "PAYMENT_CAPTURED" | "PAYMENT_FAILED" | "PAYMENT_REVERSED" | "REFUND_PENDING" | "PAYMENT_REFUNDED";
   orderStatus: "ORDER_NOT_CREATED" | "ORDER_PENDING" | "ORDER_CONFIRMED" | "ORDER_EXCEPTION";
   unsignedTransaction: "not_requested" | "prepared";
-  amountKind: "planning_amount";
-  finalTotal: "unknown";
+  amountKind: "planning_amount" | "merchant_checkout_total";
+  finalTotal: "unknown" | "verified";
   financialExecution: "disabled";
 }
 

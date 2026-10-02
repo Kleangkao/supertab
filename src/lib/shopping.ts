@@ -27,6 +27,7 @@ import {
   toOfferView,
 } from "./serialize";
 import type { ProviderNote, PurchaseView, SessionView } from "./view";
+import { checkoutAccess, readMerchantCheckout, type CheckoutEvidence } from "./merchant-checkout";
 
 export interface ShoppingDependencies {
   config: AppConfig;
@@ -52,6 +53,8 @@ interface SessionRecord {
   balanceSource: PurchaseView["balanceSource"];
   balanceError: string | null;
   snapshot: PayableSnapshot | null;
+  checkoutEvidence: CheckoutEvidence | null;
+  termsId: string;
   quote: BoundQuote | null;
   plan: FundingPlan | null;
   state: PurchaseState;
@@ -87,6 +90,7 @@ export class ShoppingService {
   private async completeTurn(current: SessionRecord, text: string): Promise<SessionView> {
     const session: SessionRecord = { ...current, messages: [...current.messages],
       selectedOfferId: null, snapshot: null, plan: null, quote: null, swapApproval: null,
+      checkoutEvidence: null, termsId: crypto.randomUUID(),
       purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING" };
     this.sessions.set(session.id, session);
     session.messages.push({ role: "user", text });
@@ -159,7 +163,8 @@ export class ShoppingService {
   }): Promise<SessionView> {
     // Each review owns a separate working record. A slower wallet/quote read
     // must never mutate a newer review (including a clear-wallet action).
-    const session: SessionRecord = { ...this.requireSession(input.sessionId), balances: [] as AssetBalance[],
+    const current = this.requireSession(input.sessionId);
+    const session: SessionRecord = { ...current, balances: [] as AssetBalance[],
       balanceSource: "none" as PurchaseView["balanceSource"], balanceError: null,
       walletAddress: null, plan: null, swapApproval: null, state: "OFFER_SELECTED" as PurchaseState };
     const excluded = this.excludedOffers.get(session.id);
@@ -174,12 +179,15 @@ export class ShoppingService {
     session.quote = null;
     session.unsignedTransaction = "not_requested";
     session.transactionVersion = null;
-    session.quantity = input.quantity && input.quantity > 0 && input.quantity <= 20 ? input.quantity : 1;
+    session.quantity = Number.isInteger(input.quantity) && input.quantity! > 0 && input.quantity! <= 20 ? input.quantity! : 1;
     session.walletMode = input.walletMode;
     session.signatureCapability = input.walletMode === "connected"
       ? (input.signatureAvailable ? "available" : "unavailable")
       : "disabled";
-    session.snapshot = payableFromOffer(offer, session.quantity);
+    session.checkoutEvidence = current.selectedOfferId === offer.id && current.quantity === session.quantity
+      && current.checkoutEvidence && current.checkoutEvidence.expiresAtMs > this.nowMs() ? current.checkoutEvidence : null;
+    session.snapshot = session.checkoutEvidence?.snapshot ?? payableFromOffer(offer, session.quantity);
+    session.termsId = crypto.randomUUID();
     this.sessions.set(session.id, session);
     await this.loadBalances(session, input.address);
     if (this.sessions.get(session.id) !== session) return this.view(this.requireSession(session.id));
@@ -226,6 +234,26 @@ export class ShoppingService {
     return this.view(this.requireSession(sessionId));
   }
 
+  async verifyMerchantTotal(sessionId: string, termsId: string, checkoutId: string): Promise<SessionView> {
+    const current = this.requireSession(sessionId);
+    const offer = this.selectedOffer(current);
+    if (!offer || current.termsId !== termsId) throw new PurchaseApprovalError("Your selection changed. Review the current product before verifying its checkout.");
+    // Invalidate old evidence before the request. Failed or changed merchant
+    // terms must not leave an earlier approval or final total usable.
+    const session: SessionRecord = { ...current, checkoutEvidence: null, snapshot: payableFromOffer(offer, current.quantity),
+      purchaseIntent: null, swapApproval: null, quote: null, plan: null,
+      unsignedTransaction: "not_requested", transactionVersion: null, termsId: crypto.randomUUID(), state: "CHECKOUT_READY" };
+    this.sessions.set(sessionId, session);
+    const evidence = await readMerchantCheckout({ offer, quantity: session.quantity, checkoutId,
+      config: this.deps.config, fetchImpl: this.deps.fetchImpl, nowMs: this.nowMs() });
+    if (this.sessions.get(sessionId) !== session) return this.view(this.requireSession(sessionId));
+    if (evidence.expiresAtMs <= this.nowMs()) throw new Error("This checkout expired while it was being read. Verify a current checkout.");
+    session.checkoutEvidence = evidence;
+    return this.review({ sessionId, offerId: offer.id, quantity: session.quantity, walletMode: session.walletMode,
+      address: session.walletAddress ?? undefined, fundingMint: current.plan?.candidateMint,
+      signatureAvailable: session.signatureCapability === "available" });
+  }
+
   async approve(sessionId: string): Promise<SessionView> {
     const session = this.requireSession(sessionId);
     if (session.state !== "SWAP_QUOTE_READY" && session.state !== "AWAITING_SWAP_APPROVAL") {
@@ -243,12 +271,14 @@ export class ShoppingService {
     return this.view(session);
   }
 
-  async approvePurchase(sessionId: string): Promise<SessionView> {
+  async approvePurchase(sessionId: string, termsId?: string): Promise<SessionView> {
     const session = this.requireSession(sessionId);
+    this.view(session); // Re-evaluate evidence freshness before accepting approval.
     const offer = this.selectedOffer(session);
     if (!session.snapshot?.merchantTotalKnown || session.snapshot.merchantTotalMinor == null) {
       throw new PurchaseApprovalError("The final merchant checkout total must be verified before approving this purchase. A planning amount is not a final checkout total.");
     }
+    if (termsId !== session.termsId) throw new PurchaseApprovalError("The reviewed terms changed. Review the current final amount before approving.");
     const amount = session.snapshot.merchantTotalMinor;
     if (!offer || amount == null) throw new Error("There is no reviewed amount to approve.");
     const now = this.nowMs();
@@ -263,7 +293,7 @@ export class ShoppingService {
       maximumAuthorizedAmountMinor: amount,
       currency: session.snapshot?.currency ?? "USD",
       approvedAtMs: now,
-      expiresAtMs: now + PURCHASE_APPROVAL_TTL_MS,
+      expiresAtMs: Math.min(now + PURCHASE_APPROVAL_TTL_MS, session.checkoutEvidence!.expiresAtMs),
       fundingPlanReference: session.plan ? `funding:${amount.toString()}` : null,
       cardRailProvider: this.rail.id,
     });
@@ -443,6 +473,14 @@ export class ShoppingService {
   }
 
   private view(session: SessionRecord): SessionView {
+    const offer = this.selectedOffer(session);
+    if (session.checkoutEvidence && this.nowMs() >= session.checkoutEvidence.expiresAtMs) {
+      session.checkoutEvidence = null;
+      session.snapshot = offer ? payableFromOffer(offer, session.quantity) : null;
+      session.purchaseIntent = null; session.swapApproval = null; session.quote = null;
+      session.unsignedTransaction = "not_requested"; session.transactionVersion = null;
+      session.termsId = crypto.randomUUID(); session.state = "FUNDING_ANALYZED";
+    }
     if (session.snapshot && session.plan) {
       session.plan = planFunding({ snapshot: session.snapshot, balances: session.balances,
         selectedFundingMint: session.plan.candidateMint, quote: session.quote, nowMs: this.nowMs() });
@@ -460,15 +498,25 @@ export class ShoppingService {
       assistantMessage: session.assistantMessage,
       constraintsLabel: describeConstraints(session.constraints) || "No constraints yet",
       messages: session.messages,
-      exact: session.offers.map(toOfferView),
+      exact: session.offers.map(item => toOfferView(item, item.id === session.selectedOfferId ? session.quantity : 1)),
       excluded: session.excluded.flatMap((item) => {
         const offer = excludedOffers.get(item.id);
-        return offer ? [{ offer: toOfferView(offer), reasons: item.reasons }] : [];
+        return offer ? [{ offer: toOfferView(offer, offer.id === session.selectedOfferId ? session.quantity : 1), reasons: item.reasons }] : [];
       }),
       providers: session.providers,
       gemini: session.gemini,
       selectedOfferId: session.selectedOfferId,
       purchase: session.snapshot && session.selectedOfferId ? {
+        termsId: session.termsId,
+        checkoutVerification: {
+          status: session.checkoutEvidence ? "verified" : "unknown",
+          readAvailable: offer ? checkoutAccess(offer, this.deps.config).available : false,
+          message: session.checkoutEvidence ? "Final total verified from the merchant. Payment and order are still separate steps."
+            : offer ? checkoutAccess(offer, this.deps.config).message : "Choose a product first.",
+          merchantOrigin: session.checkoutEvidence?.merchantOrigin ?? null,
+          verifiedAt: session.checkoutEvidence ? new Date(session.checkoutEvidence.verifiedAtMs).toISOString() : null,
+          expiresAt: session.checkoutEvidence ? new Date(session.checkoutEvidence.expiresAtMs).toISOString() : null,
+        },
         state: session.state,
         checkout: toCheckoutView(session.snapshot),
         funding: session.plan ? toFundingView(session.plan) : null,
@@ -508,8 +556,8 @@ export class ShoppingService {
         }),
         orderStatus: "ORDER_NOT_CREATED" satisfies OrderState,
         unsignedTransaction: session.unsignedTransaction,
-        amountKind: "planning_amount",
-        finalTotal: "unknown",
+        amountKind: session.checkoutEvidence ? "merchant_checkout_total" : "planning_amount",
+        finalTotal: session.checkoutEvidence ? "verified" : "unknown",
         financialExecution: "disabled",
       } : null,
     };
@@ -535,6 +583,8 @@ function emptySession(id: string): SessionRecord {
     balanceSource: "none",
     balanceError: null,
     snapshot: null,
+    checkoutEvidence: null,
+    termsId: crypto.randomUUID(),
     quote: null,
     plan: null,
     state: "DISCOVERING",
@@ -589,6 +639,8 @@ export function configStamp(config: AppConfig): string {
     config.bridgeApiKey ? "bridge" : "",
     config.dflowBaseUrl,
     config.ebayEnvironment,
+    config.shopifyCheckoutToken || (config.shopifyClientId && config.shopifyClientSecret) ? "checkout" : "",
+    config.shopifyCheckoutOrigins.join(","),
   ].join("|");
 }
 

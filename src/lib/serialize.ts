@@ -8,7 +8,16 @@ import { priceImpactPercentLabel } from "./dflow";
 import type { PayableSnapshot } from "./offers";
 import type { AssetView, CheckoutView, FundingView, OfferView } from "./view";
 
-export function toOfferView(offer: NormalizedOffer): OfferView {
+export function toOfferView(offer: NormalizedOffer, quantity = 1): OfferView {
+  let reviewUrl = merchantReviewUrl(offer.checkout.kind === "merchant_cart_link" ? offer.checkout.url : offer.productUrl);
+  if (reviewUrl && offer.source === "shopify" && offer.checkout.kind === "merchant_cart_link") {
+    const url = new URL(reviewUrl);
+    const variant = offer.sourceItemId.match(/^gid:\/\/shopify\/ProductVariant\/(\d+)$/)?.[1];
+    if (variant && url.pathname === `/cart/${variant}:1` && Number.isInteger(quantity) && quantity > 0 && quantity <= 20) {
+      url.pathname = `/cart/${variant}:${quantity}`;
+      reviewUrl = url.href;
+    }
+  }
   const shippingDisplay = offer.shipping?.costMinor == null
     ? null
     : formatPrice(offer.shipping.costMinor, 2, offer.shipping.currency ?? offer.price?.currency ?? "USD");
@@ -30,7 +39,7 @@ export function toOfferView(offer: NormalizedOffer): OfferView {
     shippingSummary: offer.shipping?.summary ?? null,
     shippingDisplay,
     productUrl: offer.productUrl,
-    merchantReviewUrl: merchantReviewUrl(offer.checkout.kind === "merchant_cart_link" ? offer.checkout.url : offer.productUrl),
+    merchantReviewUrl: reviewUrl,
     checkoutLabel: offer.checkout.kind === "merchant_cart_link"
       ? offer.checkout.nativeCheckout
         ? "Merchant checkout link"
@@ -58,10 +67,11 @@ export function toAssetView(asset: AssetBalance): AssetView {
 export function toCheckoutView(snapshot: PayableSnapshot): CheckoutView {
   return {
     itemDisplay: snapshot.itemMinor == null ? null : formatUsdFromMinor(snapshot.lineMinor ?? snapshot.itemMinor, snapshot.itemExponent),
-    itemKind: snapshot.itemBasis,
+    itemKind: snapshot.merchantTotalKnown ? "merchant_checkout" : snapshot.itemBasis,
     quantity: snapshot.quantity,
     shippingDisplay: snapshot.shippingMinor == null ? null : formatUsdFromMinor(snapshot.shippingMinor, 2),
     taxDisplay: snapshot.taxMinor == null ? null : formatUsdFromMinor(snapshot.taxMinor, 2),
+    feeDisplay: snapshot.feeMinor == null ? null : formatUsdFromMinor(snapshot.feeMinor, 2),
     discountDisplay: snapshot.discountMinor == null ? null : formatUsdFromMinor(snapshot.discountMinor, 2),
     merchantTotalDisplay: snapshot.merchantTotalKnown && snapshot.merchantTotalMinor != null
       ? formatUsdFromMinor(snapshot.merchantTotalMinor, snapshot.itemExponent)

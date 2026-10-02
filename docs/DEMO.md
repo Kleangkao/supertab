@@ -20,7 +20,8 @@
 | Wallet connection | Wallet Standard registration and connect architecture; deterministic tests | Real extension account lifecycle and signing are not fully proven; signing is disabled |
 | Funding | Integer amounts, existing canonical USDC, reserved SOL, selected asset | Current amount is a planning amount; sample assets are labeled |
 | DFlow | Live quotes and structurally valid unsigned preparation verified | No signing, broadcast, executed swap or execution simulation |
-| Purchase approval | Final-total gate returns HTTP 403 when total is unknown | Catalog planning cannot become approved merchant payment |
+| Final-total integration | Authenticated Shopify `get_checkout`, exact variant/quantity binding, integer breakdown checks and five-minute freshness; deterministic adapter/service tests | Existing checkout reference and explicitly configured merchant origin required; live final-total acceptance remains unproven |
+| Purchase approval | Final-total gate returns HTTP 403 when total is unknown; verified totals support consent bound to current terms | Catalog planning cannot become approved merchant payment; approval does not submit payment |
 | CardRail | Provider-neutral interface and Bridge sandbox adapter | Access blocked; no issued card or provider payment readiness proof |
 | Payment lifecycle | Local selected-product fixture, explicit consent, authorization/capture/refund ledger | Not Bridge/Stripe sandbox execution; no network payment calls |
 | Merchant order | Independent simulated receipt fixture | No real merchant order created or verified |
@@ -34,4 +35,4 @@
 
 ## Remaining submission work
 
-Capture final mobile/desktop screenshots and a video after the integrated checkout milestone is resolved. Deployment and GitHub push require access to the existing private destination. Do not publish this app or its environment configuration to a replacement public destination.
+Capture final mobile/desktop screenshots and a video after the integrated checkout milestone is resolved. Deployment requires an approved destination. The existing private GitHub repository is accessible on this PC. Do not publish this app or its environment configuration to a replacement public destination.

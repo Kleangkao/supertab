@@ -7,12 +7,12 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { sessionId?: unknown; execute?: unknown };
+    const body = await request.json() as { sessionId?: unknown; termsId?: unknown; execute?: unknown };
     if (body.execute === true) executeCardPayment();
     if (typeof body.sessionId !== "string") {
       return Response.json({ error: "Missing shopping session." }, { status: 400 });
     }
-    const view = await getShoppingService().approvePurchase(body.sessionId);
+    const view = await getShoppingService().approvePurchase(body.sessionId, typeof body.termsId === "string" ? body.termsId : undefined);
     return Response.json(view);
   } catch (error) {
     const status = error instanceof PurchaseApprovalError || (error instanceof Error && error.name === "FinancialExecutionDisabled")

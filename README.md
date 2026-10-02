@@ -14,6 +14,7 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - Real unsigned transaction preparation for a public wallet, with structural format checks. The preparation response supplies the displayed quote; no transaction payload or key is sent to the browser.
 - Quote expiry countdown, refresh without losing the selected product, and browser refresh recovery while the server session remains available.
 - A purchase review that keeps payment and merchant order separate.
+- Authenticated, read-only Shopify checkout verification for explicitly configured merchant origins. Only a current `ready_for_complete` response for the selected variant and quantity can supply a final USD total. Evidence expires after at most five minutes; changes or failed refreshes invalidate approval.
 - An honest "provider not connected" card rail.
 - A local payment rehearsal for the selected product with explicit approval, authorization, decline, capture, independent simulated order evidence, and refund. It uses the listed item amount plus clearly invented $5 shipping and $3 tax fixtures, makes no provider calls, and never uses wallet funds.
 
@@ -73,8 +74,15 @@ Open http://localhost:3000.
 | `DFLOW_QUOTE_BASE_URL` | Defaults to the DFlow dev quote API, which does not need a key. |
 | `DFLOW_API_KEY` | Only if you point quotes at a key-gated DFlow host. |
 | `SHOPIFY_CATALOG_ENABLED` | Shopify discovery is on by default and needs no secret. |
+| `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` | Optional Catalog credentials for authenticated merchant checkout reads. A token is obtained server-side at request time. |
+| `SHOPIFY_CHECKOUT_ACCESS_TOKEN` | Optional existing token instead of client credentials. Never exposed to the browser. |
+| `SHOPIFY_CHECKOUT_ALLOWED_ORIGINS` | Comma-separated HTTPS merchant origins approved to receive the checkout token, without paths. Empty disables checkout reads. |
 
 `GET /api/health` reports configured, not configured, available, unavailable, or not connected. It never returns secret values.
+
+For merchant checkout verification, select the exact product and quantity, open **Read an existing merchant checkout**, and provide the merchant integration's checkout reference. SuperTab calls only `get_checkout`; it does not create, update, or complete that checkout. A cart reference, incomplete checkout, extra items, mismatched variant/quantity, inconsistent monetary breakdown or expired checkout is rejected. Access depends on Shopify and merchant permissions; Catalog authentication alone does not prove those permissions. The current input is an integration aid and still needs a smoother merchant handoff before a consumer launch.
+
+Once a final total is verified, **Approve purchase terms** records consent for the displayed product and amount. It does not sign a swap, pay a merchant or create an order. A wallet refresh resets approval; product or quantity changes also discard checkout evidence. Buyer contact details and payment instruments returned by the merchant are discarded, and checkout capability references are not included in session responses.
 
 ## Scripts
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
+import { CheckoutReview } from "@/components/checkout-review";
 import { connectStandardWallet, discoverStandardWallets, watchStandardWallet, type StandardWallet } from "@/lib/wallet-standard";
 import { clearWalletReview } from "@/lib/wallet-review";
 import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
@@ -29,7 +30,7 @@ export function ShopApp() {
   const walletEpoch = useRef(0);
   const walletOff = useRef<(() => void) | null>(null);
   const latestSession = useRef<SessionView | null>(null);
-  const pendingWalletReset = useRef<{ sessionId: string; offerId: string } | null>(null);
+  const pendingWalletReset = useRef<{ sessionId: string; offerId: string; quantity: number } | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const selectedOfferId = session?.selectedOfferId;
   useEffect(() => {
@@ -73,8 +74,13 @@ export function ShopApp() {
     lock.current = true; setBusy(loading); setError(null);
     try {
       const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
-      const body = await response.json() as SessionView & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "Please try again.");
+      const body = await response.json() as SessionView & { error?: string; session?: SessionView };
+      if (!response.ok) {
+        if (body.session && epoch === walletEpoch.current) {
+          latestSession.current = body.session; setSession(body.session); setNow(currentTime());
+        }
+        throw new Error(body.error ?? "Please try again.");
+      }
       if (epoch !== walletEpoch.current) return;
       latestSession.current = body;
       setSession(body); setNow(currentTime());
@@ -101,7 +107,7 @@ export function ShopApp() {
     if (current) {
       latestSession.current = clearWalletReview(current);
       setSession(latestSession.current);
-      if (current.selectedOfferId) pendingWalletReset.current = { sessionId: current.sessionId, offerId: current.selectedOfferId };
+      if (current.selectedOfferId) pendingWalletReset.current = { sessionId: current.sessionId, offerId: current.selectedOfferId, quantity: current.purchase?.checkout.quantity ?? 1 };
     }
     try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Storage is optional. */ }
     setError("Your wallet accounts or network changed. Reconnect to review a fresh funding plan.");
@@ -115,10 +121,10 @@ export function ShopApp() {
     if (body) { setDraft(""); setFundingMint(null); }
   }
 
-  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable = false) {
+  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable = false, quantity?: number) {
     if (!session) return;
     if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; }
-    const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
+    const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, quantity: quantity ?? (session.selectedOfferId === offerId ? session.purchase?.checkout.quantity ?? 1 : 1), walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
     if (body) {
       setWalletMode(mode); setAddress(nextAddress); setFundingMint(mint);
       setShowAddressInput(!!body.purchase?.balanceError);
@@ -151,6 +157,23 @@ export function ShopApp() {
   const expired = purchase?.funding?.quoteFreshness === "stale" || (!!expiresAt && now >= expiresAt);
   const live = purchase?.funding?.quoteFreshness === "live" && !expired;
   const prepared = purchase?.unsignedTransaction === "prepared" && live;
+  const checkoutExpired = !!purchase?.checkoutVerification.expiresAt && now >= Date.parse(purchase.checkoutVerification.expiresAt);
+  const checkoutVerified = purchase?.finalTotal === "verified" && !checkoutExpired;
+
+  useEffect(() => {
+    if (!checkoutExpired || busy || !session?.sessionId) return;
+    const controller = new AbortController();
+    const termsId = purchase?.termsId;
+    void fetch(`/api/shop?sessionId=${encodeURIComponent(session.sessionId)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async response => {
+        if (!response.ok) return;
+        const current = await response.json() as SessionView;
+        if (!controller.signal.aborted && latestSession.current?.purchase?.termsId === termsId) {
+          latestSession.current = current; setSession(current);
+        }
+      }).catch(() => undefined);
+    return () => controller.abort();
+  }, [checkoutExpired, busy, session?.sessionId, purchase?.termsId]);
 
   return <main className="app-shell">
     <nav className="topbar" aria-label="Main navigation"><Link className="wordmark" href="/" aria-label="SuperTab home"><span className="brand-icon">s<span>↗</span></span>SuperTab<span className="beta">DEMO</span></Link><span className="demo-note"><span className="status-dot" />Explore freely. Money stays put.</span></nav>
@@ -177,9 +200,15 @@ export function ShopApp() {
       {purchase && <aside className="purchase-review" ref={reviewRef} aria-label="Purchase review" aria-busy={!!busy}>
         <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Let’s make a plan.</h2><span className="badge">Purchase review</span></div>
         <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
-        <div className="price-summary"><span>Item {purchase.checkout.itemKind === "catalog" ? "catalog" : "listing"} price</span><strong>{purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · final total pending</p></div>
-        <div className="notice subtle"><strong>Final checkout total unknown</strong><p>Final shipping and tax need merchant confirmation. This plan includes only the prices currently known.</p>{selected?.merchantReviewUrl && <a href={selected.merchantReviewUrl} target="_blank" rel="noopener noreferrer">Review price and delivery at the merchant ↗</a>}<p>Opening the merchant page does not approve a purchase or verify its final total in SuperTab.</p></div>
-        <details className="review-details"><summary>Price breakdown</summary><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
+        <div className="price-summary"><span>{checkoutVerified ? "Final merchant checkout total" : `Item ${purchase.checkout.itemKind === "catalog" ? "catalog" : purchase.checkout.itemKind === "merchant_checkout" ? "merchant" : "listing"} price`}</span><strong>{checkoutVerified ? purchase.checkout.merchantTotalDisplay : purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · {checkoutVerified ? "current merchant terms" : "final total pending"}</p></div>
+        <label className="asset-select">Quantity<select aria-label="Product quantity" disabled={!!busy} value={purchase.checkout.quantity}
+          onChange={event => void selectOffer(session!.selectedOfferId!, walletMode, address, fundingMint, purchase.signatureCapability === "available", Number(event.target.value))}>
+          {Array.from({ length: 20 }, (_, index) => <option key={index} value={index + 1}>{index + 1}</option>)}
+        </select></label>
+        <CheckoutReview key={`${session!.selectedOfferId}:${purchase.checkout.quantity}`} purchase={purchase} now={now} busy={!!busy} merchantUrl={selected?.merchantReviewUrl ?? null}
+          onVerify={checkoutId => request("/api/purchase/checkout", { sessionId: session!.sessionId, termsId: purchase.termsId, checkoutId }, "Verifying the merchant’s current checkout…")}
+          onApprove={() => request("/api/purchase/intent", { sessionId: session!.sessionId, termsId: purchase.termsId }, "Recording approval of these purchase terms…")} />
+        <details className="review-details"><summary>Price breakdown</summary><Row label="Items" value={purchase.checkout.itemDisplay ?? "Unknown"} /><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Other fees" value={purchase.checkout.feeDisplay ?? "None reported"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
         <Block step="1" title="Your spending assets"><p className="section-copy">Read your wallet to see how this purchase could be funded.</p>
           <div className="wallet-actions"><button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "address", DEMO_ADDRESS, null)}>Use real demo wallet <span>Read-only</span></button><div className="wallet-options"><button disabled={!!busy} onClick={() => setShowAddressInput(value => !value)}>Enter address</button><button disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button><button disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "sample", "", null)}>Sample preview</button></div></div>
           {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}

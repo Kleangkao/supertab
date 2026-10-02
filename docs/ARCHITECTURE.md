@@ -28,7 +28,13 @@ Purchase states move through checkout, funding, and an optional quote. If USDC a
 
 `BridgeCardRail` implements the provider-neutral rail interface and currently reports unavailable sandbox access. Its payment preparation throws while execution is disabled. Purchase intents obtain the provider ID from the selected adapter. `PAYMENT_CONFIRMED` cannot become `ORDER_CONFIRMED`. An order requires separate merchant-order evidence.
 
-The known price used for planning is a catalog or listing price unless a future checkout integration supplies a merchant total.
+The known price used for planning is a catalog or listing price until an authenticated merchant checkout supplies a verified total.
+
+`merchant-checkout.ts` implements a read-only Shopify Checkout MCP boundary. The server derives the merchant origin from the selected offer, requires an explicit origin allowlist, refuses redirects, authenticates with a configured token or existing Catalog client credentials, and invokes only `get_checkout`. It accepts one exact variant and quantity in a USD `ready_for_complete` checkout with unexpired evidence and a reconciled integer amount breakdown. Missing or escalated checkout state cannot supply a verified payable total. Raw buyer, payment and capability data are discarded.
+
+Final-total evidence is bound to the selected product/quantity and retained for at most five minutes. Every new wallet/funding review obtains a new terms ID and clears purchase approval; changing product or quantity discards checkout evidence too. Approval must submit the currently displayed terms ID and expires no later than checkout evidence. A failed checkout refresh removes old final-total evidence and approval before the provider call. Session reads expire evidence and revert to catalog planning rather than leaving stale final amounts usable. Verification failures return the sanitized current session so the browser clears obsolete approval.
+
+Wallet reviews and conversation turns use separate working records. Once a later review replaces the session record, an older balance/quote request cannot publish its results into it. The regression reproduces an old RPC balance read completing after a clear-wallet action.
 
 Purchase approval requires a known final merchant total, independently of conversion quote review. Payment readiness requires current approval, that final total, real chain USDC coverage and a ready rail. Sample balances and a conversion quote cannot satisfy funds readiness.
 

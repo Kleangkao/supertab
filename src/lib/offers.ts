@@ -50,6 +50,7 @@ export interface PayableSnapshot {
   shippingMinor: bigint | null;
   shippingCurrency: string | null;
   taxMinor: bigint | null;
+  feeMinor?: bigint | null;
   discountMinor: bigint | null;
   merchantTotalMinor: bigint | null;
   merchantTotalKnown: boolean;
