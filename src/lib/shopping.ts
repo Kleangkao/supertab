@@ -1,6 +1,6 @@
 import { readConfig, type AppConfig } from "./config";
 import { buildSearchQuery, describeConstraints, emptyConstraints, resolveConstraints, type ConstraintPatch, type ShoppingConstraints } from "./constraints";
-import { bindQuote, fetchDflowOrder, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
+import { bindQuote, fetchPreparedTransaction, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
 import { searchEbay } from "./ebay";
 import { knownPlanningMinor, planFunding, quoteIsUsable, type BoundQuote, type FundingPlan } from "./funding-planner";
 import { payableFromOffer, type NormalizedOffer, type PayableSnapshot } from "./offers";
@@ -45,7 +45,8 @@ interface SessionRecord {
   gemini: SessionView["gemini"];
   selectedOfferId: string | null;
   quantity: number;
-  walletMode: "none" | "sample" | "address";
+  walletMode: "none" | "sample" | "address" | "connected";
+  signatureCapability: "disabled" | "available" | "unavailable";
   walletAddress: string | null;
   balances: AssetBalance[];
   balanceSource: PurchaseView["balanceSource"];
@@ -57,6 +58,7 @@ interface SessionRecord {
   swapApproval: { at: string; executed: false } | null;
   purchaseIntent: PurchaseIntent | null;
   unsignedTransaction: "not_requested" | "prepared";
+  transactionVersion: "legacy" | "v0" | null;
 }
 
 export class ShoppingService {
@@ -145,9 +147,10 @@ export class ShoppingService {
     sessionId: string;
     offerId: string;
     quantity?: number;
-    walletMode: "none" | "sample" | "address";
+    walletMode: "none" | "sample" | "address" | "connected";
     address?: string;
     fundingMint?: string | null;
+    signatureAvailable?: boolean;
   }): Promise<SessionView> {
     const session = this.requireSession(input.sessionId);
     const excluded = this.excludedOffers.get(session.id);
@@ -158,9 +161,15 @@ export class ShoppingService {
     }
     session.selectedOfferId = offer.id;
     session.purchaseIntent = null;
+    // A new wallet, product, balance read or explicit refresh needs its own quote.
+    session.quote = null;
     session.unsignedTransaction = "not_requested";
+    session.transactionVersion = null;
     session.quantity = input.quantity && input.quantity > 0 && input.quantity <= 20 ? input.quantity : 1;
     session.walletMode = input.walletMode;
+    session.signatureCapability = input.walletMode === "connected"
+      ? (input.signatureAvailable ? "available" : "unavailable")
+      : "disabled";
     session.snapshot = payableFromOffer(offer, session.quantity);
     await this.loadBalances(session, input.address);
     const fundingMint = input.fundingMint ?? null;
@@ -192,7 +201,17 @@ export class ShoppingService {
     }
     session.state = this.stateFor(session.plan);
     session.swapApproval = null;
+    const prepared = await this.prepareUnsigned(session);
+    session.unsignedTransaction = prepared.status;
+    session.transactionVersion = prepared.version;
+    if (prepared.status === "prepared" && session.state === "SWAP_QUOTE_READY") {
+      session.state = transitionPurchase(session.state, "AWAITING_SWAP_APPROVAL");
+    }
     return this.view(session);
+  }
+
+  getSession(sessionId: string): SessionView {
+    return this.view(this.requireSession(sessionId));
   }
 
   async approve(sessionId: string): Promise<SessionView> {
@@ -200,14 +219,16 @@ export class ShoppingService {
     if (session.state !== "SWAP_QUOTE_READY" && session.state !== "AWAITING_SWAP_APPROVAL") {
       throw new Error("There is no live conversion quote to approve.");
     }
-    if (session.plan?.quoteFreshness !== "live") {
-      throw new Error("The conversion quote is no longer fresh.");
+    if (quoteIsUsable(session.quote, session.snapshot ? knownPlanningMinor(session.snapshot) : null, session.quote?.inputMint ?? null, this.nowMs()) !== "live") {
+      throw new Error("The conversion quote expired. Refresh it before reviewing approval.");
     }
     if (session.state === "SWAP_QUOTE_READY") {
       session.state = transitionPurchase(session.state, "AWAITING_SWAP_APPROVAL");
     }
     session.swapApproval = { at: new Date(this.nowMs()).toISOString(), executed: false };
-    session.unsignedTransaction = await this.prepareUnsigned(session);
+    const prepared = await this.prepareUnsigned(session);
+    session.unsignedTransaction = prepared.status;
+    session.transactionVersion = prepared.version;
     return this.view(session);
   }
 
@@ -241,10 +262,12 @@ export class ShoppingService {
       ?? null;
   }
 
-  private async prepareUnsigned(session: SessionRecord): Promise<"not_requested" | "prepared"> {
-    if (!session.walletAddress || !session.quote) return "not_requested";
+  private async prepareUnsigned(session: SessionRecord): Promise<{ status: "not_requested" | "prepared"; version: "legacy" | "v0" | null }> {
+    if (session.walletMode === "sample" || !session.walletAddress || !session.quote || !session.plan?.fundable) {
+      return { status: "not_requested", version: null };
+    }
     try {
-      const prepared = await fetchDflowOrder({
+      const prepared = await fetchPreparedTransaction({
         inputMint: session.quote.inputMint,
         outputMint: session.quote.outputMint,
         amount: session.quote.inAmount,
@@ -255,9 +278,16 @@ export class ShoppingService {
         slippageBps: this.deps.config.dflowSlippageBps,
         fetchImpl: this.deps.fetchImpl,
       });
-      return prepared.transactionPresent ? "prepared" : "not_requested";
+      if (prepared.prepared && session.snapshot) {
+        session.quote = bindQuote({ quote: prepared.quote, payableMinor: knownPlanningMinor(session.snapshot)!,
+          fundingMint: prepared.quote.inputMint, inputDecimals: session.quote.inputDecimals,
+          outputDecimals: USDC_DECIMALS, nowMs: this.nowMs() });
+      }
+      return prepared.prepared
+        ? { status: "prepared", version: prepared.version }
+        : { status: "not_requested", version: null };
     } catch {
-      return "not_requested";
+      return { status: "not_requested", version: null };
     }
   }
 
@@ -285,7 +315,7 @@ export class ShoppingService {
         targetOut: deficit,
         options,
       });
-      if (result.status !== "quoted" || !result.quote) return null;
+      if (!result.quote) return null;
       return bindQuote({
         quote: result.quote,
         payableMinor: planningMinor,
@@ -321,7 +351,7 @@ export class ShoppingService {
       session.balanceSource = "sample";
       return;
     }
-    if (session.walletMode === "address" && address?.trim()) {
+    if ((session.walletMode === "address" || session.walletMode === "connected") && address?.trim()) {
       try {
         const wallet = createReadOnlyWallet({
           rpcUrl: this.deps.config.solanaRpcUrl,
@@ -398,6 +428,16 @@ export class ShoppingService {
   }
 
   private view(session: SessionRecord): SessionView {
+    if (session.snapshot && session.plan) {
+      session.plan = planFunding({ snapshot: session.snapshot, balances: session.balances,
+        selectedFundingMint: session.plan.candidateMint, quote: session.quote, nowMs: this.nowMs() });
+      if ((session.plan.quoteFreshness !== "live" || !session.plan.fundable) && (session.state === "SWAP_QUOTE_READY" || session.state === "AWAITING_SWAP_APPROVAL")) {
+        session.state = "FUNDING_ANALYZED";
+        session.unsignedTransaction = "not_requested";
+        session.transactionVersion = null;
+        session.swapApproval = null;
+      }
+    }
     const excludedOffers = this.excludedOffers.get(session.id) ?? new Map<string, NormalizedOffer>();
     const rail: PaymentRailStatus = this.rail.status();
     return {
@@ -418,7 +458,14 @@ export class ShoppingService {
         checkout: toCheckoutView(session.snapshot),
         funding: session.plan ? toFundingView(session.plan) : null,
         walletMode: session.walletMode,
+        walletKind: session.walletMode === "sample"
+          ? "sample"
+          : session.walletMode === "connected"
+            ? "connected"
+            : session.walletMode === "address" ? "read_only" : "none",
         walletAddress: session.walletAddress,
+        signatureCapability: session.signatureCapability,
+        transactionVersion: session.transactionVersion,
         balanceSource: session.balanceSource,
         balanceError: session.balanceError,
         assets: session.balances.map(toAssetView),
@@ -465,6 +512,7 @@ function emptySession(id: string): SessionRecord {
     selectedOfferId: null,
     quantity: 1,
     walletMode: "none",
+    signatureCapability: "disabled",
     walletAddress: null,
     balances: [],
     balanceSource: "none",
@@ -476,6 +524,7 @@ function emptySession(id: string): SessionRecord {
     swapApproval: null,
     purchaseIntent: null,
     unsignedTransaction: "not_requested",
+    transactionVersion: null,
   };
 }
 

@@ -10,6 +10,8 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - A read-only Solana address lookup, plus a clearly labeled sample-asset preview.
 - A funding plan that uses integer token math.
 - A live DFlow quote from the dev API, without a signature or a broadcast.
+- Real unsigned transaction preparation for a public wallet, with structural format checks. The preparation response supplies the displayed quote; no transaction payload or key is sent to the browser.
+- Quote expiry countdown, refresh without losing the selected product, and browser refresh recovery while the server session remains available.
 - A purchase review that keeps payment and merchant order separate.
 - An honest "provider not connected" card rail.
 
@@ -17,7 +19,20 @@ Catalog and listing prices are not merchant checkout totals. Shipping and tax st
 
 ## What is not executable
 
-SuperTab will not swap, sign, broadcast, issue a card, or pay a merchant. Approving a conversion only records intent.
+SuperTab will not swap, sign, broadcast, issue a card, or pay a merchant. The interface stops at awaiting user approval and exposes no execution button. Existing approval endpoints record intent only.
+
+## Presenter flow
+
+1. Ask “Find me a black polo under $50.”
+2. Follow up with “Navy is fine too.” The product, budget, and both colors remain visible.
+3. Select a real product and choose **Use real demo wallet — Read-only**. This explicit convenience uses the session demo address `JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7`; it is never selected automatically or used as a universal wallet.
+4. Review the planning amount, actual USDC, funding gap, and live DFlow quote. A fundable real-wallet plan prepares an unsigned transaction and reaches `AWAITING_SWAP_APPROVAL`. No approval is recorded automatically.
+5. If the countdown expires, choose **Refresh funding quote**. Product and wallet context stay in place.
+6. Point out the future CardRail and the explicit payment/order statuses. Bridge sandbox access is blocked, no card exists, and merchant order creation is not implemented.
+
+Balances and prices change. During the October 2, 2026 verification, the demo wallet held about 0.057 SOL and 0.000004 USDC. After reserving 0.01 SOL, DFlow quoted about 5.73 USDC of funding capacity. The $27 polo was correctly insufficient; following up with “Under $5 please.” found a real $4 Shopify polo that reached unsigned preparation. Do not imply a more expensive item is fundable or top up this wallet as part of automated demo work.
+
+Sample preview uses illustrative balances and never prepares a transaction. Wallet connection requires a supported browser extension; a restored connected session is displayed as read-only until reconnected. Sessions are held in server memory: a page refresh recovers them, while a server restart requires a new search. Structural transaction validation is not execution simulation or verification of every program’s semantics.
 
 ## Requirements
 
@@ -61,7 +76,7 @@ npm run build
 npm run dev
 ```
 
-`SUPERTAB_LIVE=1 npm test` also requests one real DFlow quote and reads one public Solana address. Neither call signs or broadcasts.
+`SUPERTAB_LIVE=1 npm test -- --testTimeout=30000` also requests a real DFlow quote, prepares an unsigned transaction, and reads a public Solana address. Set `SUPERTAB_PUBLIC_ADDRESS` to override the public test address. Neither call signs or broadcasts. Load local environment configuration before running these checks (for example, Node’s `--env-file=.env.local`); never print credential values.
 
 ## Safety
 

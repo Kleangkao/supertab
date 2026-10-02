@@ -77,8 +77,11 @@ export interface PurchaseView {
   state: string;
   checkout: CheckoutView;
   funding: FundingView | null;
-  walletMode: "none" | "sample" | "address";
+  walletMode: "none" | "sample" | "address" | "connected";
+  walletKind: "none" | "sample" | "read_only" | "connected";
   walletAddress: string | null;
+  signatureCapability: "disabled" | "available" | "unavailable";
+  transactionVersion: "legacy" | "v0" | null;
   balanceSource: "none" | "sample" | "chain" | "error";
   balanceError: string | null;
   assets: AssetView[];

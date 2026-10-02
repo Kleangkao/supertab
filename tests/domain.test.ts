@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mapBridgeCardEvent, verifyIssuingWebhook } from "../src/lib/bridge-events";
 import { BridgeCardRail, describeSolanaFundingBinding } from "../src/lib/bridge-rail";
 import { emptyConstraints, mergeConstraints, resolveConstraints } from "../src/lib/constraints";
-import { fetchDflowOrder, parseDflowOrder, priceImpactPercentLabel, QUOTE_FRESHNESS_MS } from "../src/lib/dflow";
+import { fetchDflowOrder, parseDflowOrder, priceImpactPercentLabel, QUOTE_FRESHNESS_MS, solanaTransactionSummary } from "../src/lib/dflow";
 import { normalizeEbaySummaries, searchEbay } from "../src/lib/ebay";
 import { broadcastTransaction, executeCardPayment, executeSwap } from "../src/lib/execution";
 import { classifyOffers } from "../src/lib/filter-offers";
@@ -19,7 +19,7 @@ import { normalizeShopifyProducts, searchShopify } from "../src/lib/shopify";
 import { toOfferView } from "../src/lib/serialize";
 import { buildHealth } from "../src/lib/health";
 import { readConfig } from "../src/lib/config";
-import { createReadOnlyWallet, parseTokenAccounts } from "../src/lib/wallet";
+import { createReadOnlyWallet, isPlausibleAddress, parseTokenAccounts } from "../src/lib/wallet";
 import { connectStandardWallet, discoverStandardWallets } from "../src/lib/wallet-standard";
 import { JUP_MINT, USDC_MINT, WSOL_MINT, sampleSpendingAssets } from "../src/lib/tokens";
 import { extractConstraintPatch, extractOutputText } from "../src/lib/gemini";
@@ -64,6 +64,15 @@ describe("shopping constraints", () => {
 });
 
 describe("commerce normalization", () => {
+  it("keeps Polo branded fragrance out of a polo clothing shortlist", () => {
+    const constraints = mergeConstraints(emptyConstraints(), "Find me a black polo under $50.");
+    const classified = classifyOffers([
+      offer({ title: "Polo Black by Ralph Lauren 4.2 oz EDT Cologne for Men", amount: 3600n }),
+      offer({ title: "Black Torrey Polo", amount: 2700n, id: "shirt" }),
+    ], constraints);
+    expect(classified.exact.map(item => item.id)).toEqual(["shirt"]);
+    expect(classified.excluded[0]?.reasons.join(" ")).toMatch(/clothing|fragrance/i);
+  });
   it("normalizes a Shopify catalog variant without inventing shipping or tax", () => {
     const [offer] = normalizeShopifyProducts([shopifyProduct()], NOW);
     expect(offer?.source).toBe("shopify");
@@ -179,6 +188,16 @@ describe("wallet and funding", () => {
     expect(quoteIsUsable(bound, 19000n, WSOL_MINT, 1_000)).toBe("mismatched");
     expect(quoteIsUsable(bound, 18900n, JUP_MINT, 1_000)).toBe("mismatched");
     expect(quoteIsUsable(bound, 18900n, WSOL_MINT, bound.expiresAtMs + 1)).toBe("stale");
+    expect(quoteIsUsable(bound, 18900n, WSOL_MINT, bound.expiresAtMs)).toBe("stale");
+  });
+  it("requires the minimum received to cover the gap after slippage", () => {
+    const plan = planFunding({ snapshot: payableFromOffer(offer({ amount: 18900n }), 1),
+      balances: [{ ...sampleSpendingAssets()[0]!, amount: 110_000_000n }, sampleSpendingAssets()[1]!],
+      selectedFundingMint: null,
+      quote: { ...quote({ outAmount: 80_000_000n, inAmount: 50_000_000n }), minOutAmount: 78_000_000n }, nowMs: 1000 });
+    expect(plan.quoteFreshness).toBe("live");
+    expect(plan.fundable).toBe(false);
+    expect(plan.readiness).toBe("not_fundable");
   });
 
   it("does not spend the SOL reserve or an unsupported token automatically", () => {
@@ -200,6 +219,10 @@ describe("wallet and funding", () => {
 });
 
 describe("dflow quotes", () => {
+  it("rejects a truncated transaction with a plausible version marker", () => {
+    const truncated = Buffer.concat([Buffer.from([1]), Buffer.alloc(64), Buffer.from([0x80, 0, 0])]).toString("base64");
+    expect(solanaTransactionSummary(truncated).valid).toBe(false);
+  });
   it("parses a real quote shape and treats the documented price impact scale", () => {
     const parsed = parseDflowOrder({
       inputMint: WSOL_MINT,
@@ -440,6 +463,44 @@ describe("shopping service config", () => {
 });
 
 describe("shopping flow", () => {
+  it("keeps Shopify results when eBay fails", async () => {
+    const service = new ShoppingService({ config: { ...testConfig(), ebayClientId: "test", ebayClientSecret: "test" },
+      fetchImpl: input => String(input).includes("ebay.com") ? Promise.resolve(new Response("unavailable", { status: 503 })) : mockFetch(input) });
+    const result = await service.converse(null, "Find me black running shoes, size 42, under $120.");
+    expect(result.exact).toHaveLength(1);
+    expect(result.exact[0]?.source).toBe("shopify");
+    expect(result.providers.find(provider => provider.provider === "ebay")?.status).toBe("unavailable");
+  });
+  it("rejects approval after the quote expires even without another review", async () => {
+    let clock = new Date(NOW);
+    const service = new ShoppingService({ config: testConfig(), fetchImpl: mockFetch as typeof fetch, now: () => clock });
+    const search = await service.converse(null, "Find me black running shoes, size 42, under $120.");
+    await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "sample" });
+    clock = new Date(clock.getTime() + QUOTE_FRESHNESS_MS + 1);
+    await expect(service.approve(search.sessionId)).rejects.toThrow(/expired|fresh/i);
+    const restored = service.getSession(search.sessionId);
+    expect(restored.purchase?.funding?.quoteFreshness).toBe("stale");
+    expect(restored.purchase?.state).toBe("FUNDING_ANALYZED");
+    const refreshed = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "sample" });
+    expect(refreshed.selectedOfferId).toBe(search.exact[0]!.id);
+    expect(refreshed.purchase?.funding?.quoteFreshness).toBe("live");
+  });
+  it("shows an insufficient live quote without claiming readiness", async () => {
+    const service = new ShoppingService({ config: testConfig(), now: () => new Date(NOW), fetchImpl: input => {
+      if (String(input).includes("dflow.test")) {
+        const amount = new URL(String(input)).searchParams.get("amount")!;
+        return Promise.resolve(Response.json({ inputMint: WSOL_MINT, outputMint: USDC_MINT, inAmount: amount,
+          outAmount: (BigInt(amount) / 1000n).toString(), minOutAmount: (BigInt(amount) / 1000n).toString() }));
+      }
+      return mockFetch(input);
+    } });
+    const search = await service.converse(null, "Find me black running shoes, size 42, under $120.");
+    const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "sample" });
+    expect(review.purchase?.funding?.quoteFreshness).toBe("live");
+    expect(review.purchase?.funding?.fundable).toBe(false);
+    expect(review.purchase?.state).toBe("FUNDING_ANALYZED");
+    expect(review.purchase?.unsignedTransaction).toBe("not_requested");
+  });
   it("selects a real-shaped offer and attaches a mocked DFlow quote to the deficit", async () => {
     const service = new ShoppingService({
       config: testConfig(),
@@ -463,7 +524,7 @@ describe("shopping flow", () => {
     expect(reviewed.purchase?.funding?.fundable).toBe(true);
     expect(reviewed.purchase?.state).toBe("SWAP_QUOTE_READY");
     expect(reviewed.purchase?.cardRail.access).toBe("sandbox_blocked");
-    expect(JSON.stringify(reviewed)).not.toContain("transaction");
+    expect(reviewed.purchase?.unsignedTransaction).toBe("not_requested");
     const approved = await service.approve(reviewed.sessionId);
     expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
     expect(approved.purchase?.swapApproval?.executed).toBe(false);
@@ -622,6 +683,110 @@ describe("purchase approval and Bridge card events", () => {
     expect(connected.address).toBe("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg");
     expect(connected.canRequestSignature).toBe(true);
     expect(signed).toBe(false);
+  });
+});
+
+describe("wallet modes", () => {
+  const publicAddress = "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg";
+
+  it("accepts a 32-byte Solana public key and rejects anything else", () => {
+    expect(isPlausibleAddress(publicAddress)).toBe(true);
+    expect(isPlausibleAddress("not-a-solana-address")).toBe(false);
+    expect(isPlausibleAddress("123")).toBe(false);
+    expect(isPlausibleAddress("oooooooooooooooooooooooooooooooooooooooooooo")).toBe(false);
+  });
+
+  it("keeps sample, read-only, and connected wallets apart", async () => {
+    const tx = Buffer.concat([Buffer.from([1]), Buffer.alloc(64), Buffer.from([0x80, 1, 0, 1, 2]),
+      Buffer.alloc(64, 1), Buffer.alloc(32, 2), Buffer.from([1, 1, 1, 0, 1, 0, 0])]).toString("base64");
+    expect(solanaTransactionSummary(tx).valid).toBe(true);
+    expect(solanaTransactionSummary("not-a-transaction").valid).toBe(false);
+    let sawPublicKey = false;
+    const service = new ShoppingService({
+      config: testConfig(),
+      now: () => new Date("2026-04-02T00:00:00.000Z"),
+      fetchImpl: (input, init) => {
+        const url = String(input);
+        if (url.includes("dflow.test")) {
+          const parsed = new URL(url);
+          const key = parsed.searchParams.get("userPublicKey");
+          if (key) sawPublicKey = key === publicAddress;
+          const amount = parsed.searchParams.get("amount") ?? "1";
+          const out = (BigInt(amount) * 1000n).toString();
+          return Promise.resolve(Response.json({
+            inputMint: WSOL_MINT,
+            inAmount: amount,
+            outputMint: USDC_MINT,
+            outAmount: out,
+            otherAmountThreshold: out,
+            slippageBps: 50,
+            priceImpactPct: "0",
+            ...(key ? { transaction: tx } : {}),
+          }));
+        }
+        if (url.includes("mainnet-beta.solana.com")) {
+          const body = JSON.parse(String(init?.body)) as { method?: string };
+          if (body.method === "getBalance") return Promise.resolve(Response.json({ result: { value: 500_000_000 } }));
+          return Promise.resolve(Response.json({ result: { value: [] } }));
+        }
+        return mockFetch(input);
+      },
+    });
+    const session = await service.converse(null, "Find me black running shoes, size 42, under $120.");
+    const sample = await service.review({
+      sessionId: session.sessionId,
+      offerId: session.exact[0]!.id,
+      walletMode: "sample",
+    });
+    expect(sample.purchase?.walletKind).toBe("sample");
+    expect(sample.purchase?.signatureCapability).toBe("disabled");
+    expect(sample.purchase?.assets.some((asset) => asset.amountDisplay === "42 USDC")).toBe(true);
+    expect(sample.purchase?.unsignedTransaction).toBe("not_requested");
+
+    const invalid = await service.review({
+      sessionId: session.sessionId,
+      offerId: session.exact[0]!.id,
+      walletMode: "address",
+      address: "not-a-solana-address",
+      signatureAvailable: true,
+    });
+    expect(invalid.purchase?.walletKind).toBe("read_only");
+    expect(invalid.purchase?.balanceError).toMatch(/solana address/i);
+    expect(invalid.purchase?.assets).toEqual([]);
+    expect(invalid.purchase?.signatureCapability).toBe("disabled");
+
+    const readonly = await service.review({
+      sessionId: session.sessionId,
+      offerId: session.exact[0]!.id,
+      walletMode: "address",
+      address: publicAddress,
+      signatureAvailable: true,
+    });
+    expect(readonly.purchase?.walletKind).toBe("read_only");
+    expect(readonly.purchase?.signatureCapability).toBe("disabled");
+    expect(readonly.purchase?.assets.some((asset) => asset.amountDisplay === "42 USDC")).toBe(false);
+    expect(readonly.purchase?.assets.find((asset) => asset.symbol === "SOL")?.amountDisplay).toBe("0.5 SOL");
+    expect(readonly.purchase?.unsignedTransaction).toBe("prepared");
+    expect(readonly.purchase?.transactionVersion).toBe("v0");
+    expect(sawPublicKey).toBe(true);
+    expect(JSON.stringify(readonly)).not.toContain(tx);
+
+    const connected = await service.review({
+      sessionId: session.sessionId,
+      offerId: session.exact[0]!.id,
+      walletMode: "connected",
+      address: publicAddress,
+      signatureAvailable: true,
+    });
+    expect(connected.purchase?.walletKind).toBe("connected");
+    expect(connected.purchase?.signatureCapability).toBe("available");
+    expect(connected.purchase?.assets.some((asset) => asset.amountDisplay === "42 USDC")).toBe(false);
+    const approved = await service.approve(connected.sessionId);
+    expect(approved.purchase?.state).toBe("AWAITING_SWAP_APPROVAL");
+    expect(approved.purchase?.swapApproval?.executed).toBe(false);
+    expect(approved.purchase?.unsignedTransaction).toBe("prepared");
+    expect(() => executeSwap()).toThrow(/disabled/i);
+    expect(createReadOnlyWallet({ rpcUrl: "https://rpc.example.test", customRpc: false }).requestSignature().status).toBe("disabled");
   });
 });
 

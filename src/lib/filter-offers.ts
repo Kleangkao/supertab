@@ -26,6 +26,10 @@ export function classifyOffers(offers: NormalizedOffer[], constraints: ShoppingC
 export function constraintViolations(offer: NormalizedOffer, constraints: ShoppingConstraints): string[] {
   const reasons: string[] = [];
   const haystack = offerText(offer);
+  const fragrance = /\b(cologne|perfume|fragrance|edt|edp|eau de (?:toilette|parfum))\b/i;
+  if (/\bpolo\b/i.test(constraints.productQuery) && !fragrance.test(constraints.productQuery) && fragrance.test(offer.title)) {
+    reasons.push("This is a fragrance, not polo clothing.");
+  }
 
   const missedTerms = constraints.requiredTerms.filter((term) => !includesTerm(haystack, term));
   if (constraints.requiredTerms.length > 0 && missedTerms.length === constraints.requiredTerms.length) {

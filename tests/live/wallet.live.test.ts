@@ -5,7 +5,7 @@ import { createReadOnlyWallet } from "../../src/lib/wallet";
 const live = process.env.SUPERTAB_LIVE === "1";
 
 /** Public address cited in Solana docs. Read-only. No key is involved. */
-const PUBLIC_ADDRESS = "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg";
+const PUBLIC_ADDRESS = process.env.SUPERTAB_PUBLIC_ADDRESS || "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg";
 
 describe.skipIf(!live)("live Solana balance read", () => {
   it("reads SOL and token accounts and refuses to sign", async () => {

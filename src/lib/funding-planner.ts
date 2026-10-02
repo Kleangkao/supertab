@@ -66,7 +66,7 @@ export function quoteIsUsable(
 ): QuoteFreshness {
   if (!quote || payableMinor == null || !fundingMint) return "missing";
   if (quote.boundPayableMinor !== payableMinor || quote.boundFundingMint !== fundingMint) return "mismatched";
-  if (nowMs > quote.expiresAtMs) return "stale";
+  if (nowMs >= quote.expiresAtMs) return "stale";
   return "live";
 }
 
@@ -154,7 +154,10 @@ export function planFunding(input: {
     notes.push("This is a live quote, not a completed conversion.");
   }
 
-  const covers = live != null && live.outAmount >= deficit && live.inAmount <= spendable;
+  const covers = live != null && live.minOutAmount >= deficit && live.inAmount <= spendable;
+  if (live && live.minOutAmount < deficit && live.outAmount >= deficit) {
+    notes.push("The minimum received after slippage does not cover the funding gap.");
+  }
   if (live && live.inAmount > spendable) {
     notes.push("The quote asks for more of the funding asset than can be used while keeping the network reserve.");
   }

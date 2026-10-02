@@ -37,6 +37,121 @@ export interface DflowClientOptions {
   now?: () => number;
 }
 
+export function solanaTransactionSummary(encoded: string): {
+  valid: boolean;
+  version: "legacy" | "v0" | null;
+  byteLength: number;
+} {
+  const bytes = decodeTransactionBytes(encoded);
+  if (!bytes || bytes.length < 1 + 64 + 3) {
+    return { valid: false, version: null, byteLength: bytes?.length ?? 0 };
+  }
+  const invalid = { valid: false, version: null, byteLength: bytes.length };
+  // Structural validation only, not simulation or verification of program semantics.
+  // https://solana.com/docs/core/transactions/transaction-structure
+  let at = 0;
+  const readByte = () => { if (at >= bytes.length) throw new Error("Truncated transaction"); return bytes[at++]!; };
+  const readLength = () => {
+    let value = 0;
+    for (let shift = 0; shift <= 14; shift += 7) {
+      const byte = readByte();
+      if (shift === 14 && byte > 3) throw new Error("Invalid compact-u16");
+      value |= (byte & 127) << shift;
+      if ((byte & 128) === 0) {
+        if (shift > 0 && byte === 0) throw new Error("Non-canonical compact-u16");
+        return value;
+      }
+    }
+    throw new Error("Invalid compact-u16");
+  };
+  const take = (length: number) => {
+    if (at + length > bytes.length) throw new Error("Truncated transaction");
+    const part = bytes.subarray(at, at + length); at += length; return part;
+  };
+  try {
+    if (bytes.length > 1232) return invalid;
+    const signatures = readLength();
+    if (signatures < 1 || signatures > 8) return invalid;
+    // This path must only accept unsigned transactions.
+    if (take(signatures * 64).some(byte => byte !== 0)) return invalid;
+    const marker = readByte();
+    const version = (marker & 128) === 0 ? "legacy" : "v0";
+    if (version === "v0" && marker !== 128) return invalid;
+    const required = version === "v0" ? readByte() : marker;
+    const readonlySigned = readByte();
+    const readonlyUnsigned = readByte();
+    const accounts = readLength();
+    if (required !== signatures || accounts < required || accounts > 256 || readonlySigned >= required || readonlyUnsigned > accounts - required) return invalid;
+    take(accounts * 32); take(32);
+    const instructions = readLength();
+    if (instructions < 1) return invalid;
+    const referenced: number[] = [];
+    for (let index = 0; index < instructions; index++) {
+      const programIndex = readByte();
+      if (programIndex >= accounts) return invalid;
+      referenced.push(...take(readLength()));
+      take(readLength());
+    }
+    let loaded = 0;
+    if (version === "v0") {
+      const tables = readLength();
+      for (let index = 0; index < tables; index++) {
+        take(32);
+        const writable = readLength(); take(writable);
+        const readonly = readLength(); take(readonly);
+        loaded += writable + readonly;
+      }
+    }
+    if (accounts + loaded > 256 || referenced.some(index => index >= accounts + loaded) || at !== bytes.length) return invalid;
+    return { valid: true, version, byteLength: bytes.length };
+  } catch { return invalid; }
+}
+
+function decodeTransactionBytes(encoded: string): Buffer | null {
+  const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + "=".repeat(padding);
+  const bytes = Buffer.from(padded, "base64");
+  if (bytes.length === 0) return null;
+  if (Buffer.from(bytes).toString("base64").replace(/=+$/, "") !== padded.replace(/=+$/, "")) return null;
+  return bytes;
+}
+
+export async function fetchPreparedTransaction(
+  input: { inputMint: string; outputMint: string; amount: bigint; userPublicKey: string },
+  options: DflowClientOptions,
+): Promise<{ prepared: false } | { prepared: true; version: "legacy" | "v0"; byteLength: number; quote: DflowQuote }> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const params = new URLSearchParams({
+    inputMint: input.inputMint,
+    outputMint: input.outputMint,
+    amount: input.amount.toString(),
+    slippageBps: String(options.slippageBps ?? 50),
+    userPublicKey: input.userPublicKey,
+  });
+  if (input.inputMint === "So11111111111111111111111111111111111111112") {
+    params.set("wrapAndUnwrapSol", "true");
+  }
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (options.apiKey) headers["x-api-key"] = options.apiKey;
+  const response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}/order?${params.toString()}`, {
+    headers,
+    signal: AbortSignal.timeout(options.timeoutMs ?? 12_000),
+  });
+  const text = await response.text();
+  const payload = text ? safeJson(text) : null;
+  if (!response.ok || !payload || typeof payload !== "object") return { prepared: false };
+  const record = payload as Record<string, unknown>;
+  const quote = parseDflowOrder(payload);
+  if (quote.inputMint !== input.inputMint || quote.outputMint !== input.outputMint || quote.inAmount !== input.amount) {
+    return { prepared: false };
+  }
+  const encoded = typeof record.transaction === "string" ? record.transaction : "";
+  const summary = solanaTransactionSummary(encoded);
+  if (!summary.valid || !summary.version) return { prepared: false };
+  return { prepared: true, version: summary.version, byteLength: summary.byteLength, quote };
+}
+
 export function parseDflowOrder(payload: unknown): DflowQuote {
   if (!payload || typeof payload !== "object") {
     throw new Error("DFlow returned an unreadable quote.");
@@ -157,7 +272,7 @@ export async function quoteInputForTargetOutput(input: {
       quote = await request(input.spendable);
       return quote.outAmount >= input.targetOut
         ? { status: "quoted", quote }
-        : { status: "insufficient" };
+        : { status: "insufficient", quote };
     }
     if (estimate !== quote.inAmount) quote = await request(estimate);
     if (quote.outAmount >= input.targetOut && quote.inAmount <= input.spendable) {
@@ -172,7 +287,7 @@ export async function quoteInputForTargetOutput(input: {
         }
       }
     }
-    return { status: "insufficient" };
+    return { status: "insufficient", quote };
   } catch (error) {
     if (error instanceof DflowRouteError) return { status: "no_route" };
     throw error;

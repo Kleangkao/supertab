@@ -1,412 +1,193 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { connectStandardWallet, discoverStandardWallets, type StandardWallet } from "@/lib/wallet-standard";
-import type { HealthView, OfferView, SessionView } from "@/lib/view";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import Link from "next/link";
+import { connectStandardWallet, discoverStandardWallets } from "@/lib/wallet-standard";
+import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
 
-const EMPTY_HEALTH: HealthView = {
-  gemini: "not_configured",
-  geminiModel: "gemini-3.5-flash-lite",
-  shopify: "not_configured",
-  ebay: "not_configured",
-  solana: "unavailable",
-  dflow: "unavailable",
-  cardRail: "sandbox_blocked",
-  financialExecution: "disabled",
-};
+// An explicit convenience for this demo session, never an application wallet default.
+const DEMO_ADDRESS = "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7";
+const STORAGE_KEY = "supertab.shopping-session.v1";
+type WalletMode = PurchaseView["walletMode"];
+const currentTime = () => Date.now();
 
 export function ShopApp() {
-  const [health, setHealth] = useState<HealthView>(EMPTY_HEALTH);
+  const [health, setHealth] = useState<HealthView | null>(null);
   const [session, setSession] = useState<SessionView | null>(null);
-  const [draft, setDraft] = useState("Find me black running shoes, size 42, under $120.");
-  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [walletMode, setWalletMode] = useState<"none" | "sample" | "address">("none");
+  const [walletMode, setWalletMode] = useState<WalletMode>("none");
   const [address, setAddress] = useState("");
+  const [showAddressInput, setShowAddressInput] = useState(false);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
-  const [browserWallet, setBrowserWallet] = useState<StandardWallet | null>(null);
-  const [canRequestSignature, setCanRequestSignature] = useState(false);
+  const [now, setNow] = useState(0);
+  const lock = useRef(false);
+  const reviewRef = useRef<HTMLElement>(null);
+  const selectedOfferId = session?.selectedOfferId;
+  useEffect(() => {
+    if (selectedOfferId) reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedOfferId]);
 
   useEffect(() => {
-    void fetch("/api/health").then(async (response) => {
+    const controller = new AbortController();
+    void fetch("/api/health", { signal: controller.signal }).then(async response => {
       if (response.ok) setHealth(await response.json() as HealthView);
     }).catch(() => undefined);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    let saved: string | null = null;
+    try { saved = sessionStorage.getItem(STORAGE_KEY); } catch { /* Storage is optional. */ }
+    if (saved) {
+      lock.current = true;
+      queueMicrotask(() => { if (!controller.signal.aborted) setBusy("Restoring your shopping session…"); });
+      void fetch(`/api/shop?sessionId=${encodeURIComponent(saved)}`, { signal: controller.signal }).then(async response => {
+        if (!response.ok) throw new Error("Your previous search expired. Let’s find something new.");
+        const restored = await response.json() as SessionView;
+        if (restored.purchase?.walletMode === "connected") {
+          restored.purchase = { ...restored.purchase, walletMode: "address", walletKind: "read_only", signatureCapability: "disabled" };
+        }
+        setSession(restored);
+        setWalletMode(restored.purchase?.walletMode === "connected" ? "address" : restored.purchase?.walletMode ?? "none");
+        setAddress(restored.purchase?.walletAddress ?? "");
+        setFundingMint(restored.purchase?.funding?.candidateMint ?? null);
+        setNow(Date.now());
+      }).catch(caught => {
+        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Could not restore your search.");
+      }).finally(() => { if (!controller.signal.aborted) { lock.current = false; setBusy(null); } });
+    }
+    return () => { controller.abort(); window.clearInterval(timer); };
   }, []);
+
+  async function request(path: string, payload: object, loading: string) {
+    if (lock.current) return;
+    lock.current = true; setBusy(loading); setError(null);
+    try {
+      const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
+      const body = await response.json() as SessionView & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Please try again.");
+      setSession(body); setNow(currentTime());
+      try { sessionStorage.setItem(STORAGE_KEY, body.sessionId); } catch { /* Storage is optional. */ }
+      return body;
+    } catch (caught) {
+      setError(caught instanceof Error && caught.name !== "TimeoutError" ? caught.message : "This is taking too long. Your selection is still here; please try again.");
+    } finally { lock.current = false; setBusy(null); }
+  }
 
   async function search(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/shop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: session?.sessionId, message: draft }),
-      });
-      const body = await response.json() as SessionView & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "Search failed.");
-      setSession(body);
-      setDraft("");
-      setFundingMint(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Search failed.");
-    } finally {
-      setBusy(false);
-    }
+    if (!draft.trim()) return;
+    const body = await request("/api/shop", { sessionId: session?.sessionId, message: draft }, "Finding real products for you…");
+    if (body) { setDraft(""); setFundingMint(null); }
   }
 
-  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint) {
+  async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable = false) {
     if (!session) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/purchase", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: session.sessionId,
-          offerId,
-          walletMode: mode,
-          address: nextAddress,
-          fundingMint: mint,
-        }),
-      });
-      const body = await response.json() as SessionView & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "Could not open the purchase review.");
-      setSession(body);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not open the purchase review.");
-    } finally {
-      setBusy(false);
+    const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
+    if (body) {
+      setWalletMode(mode); setAddress(nextAddress); setFundingMint(mint);
+      setShowAddressInput(!!body.purchase?.balanceError);
     }
   }
 
   async function connectWallet() {
-    const found = discoverStandardWallets(window)[0] ?? null;
-    setBrowserWallet(found);
-    if (!found) {
-      setError("No Solana wallet was found in this browser.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
+    if (lock.current) return;
+    const wallet = discoverStandardWallets(window)[0];
+    if (!wallet) { setError("No Solana wallet extension was found. Use the real demo wallet in read-only mode instead."); return; }
+    lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
-      const connected = await connectStandardWallet(found);
-      setAddress(connected.address);
-      setWalletMode("address");
-      setCanRequestSignature(connected.canRequestSignature);
-      const id = selectedId(session);
-      if (id) await selectOffer(id, "address", connected.address, fundingMint);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The wallet did not connect.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approvePurchase() {
-    if (!session) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/purchase/intent", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: session.sessionId }),
-      });
-      const body = await response.json() as SessionView & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "This purchase was not approved.");
-      setSession(body);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "This purchase was not approved.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approve() {
-    if (!session) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/purchase/approve", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: session.sessionId }),
-      });
-      const body = await response.json() as SessionView & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "Approval was not recorded.");
-      setSession(body);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Approval was not recorded.");
-    } finally {
-      setBusy(false);
-    }
+      const connected = await connectStandardWallet(wallet);
+      lock.current = false;
+      if (session?.selectedOfferId) await selectOffer(session.selectedOfferId, "connected", connected.address, null, connected.canRequestSignature);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
+    finally { lock.current = false; setBusy(null); }
   }
 
   const purchase = session?.purchase;
+  const selected = session?.exact.find(offer => offer.id === session.selectedOfferId);
+  const expiresAt = purchase?.funding?.quoteExpiresAt ? Date.parse(purchase.funding.quoteExpiresAt) : 0;
+  const expired = purchase?.funding?.quoteFreshness === "stale" || (!!expiresAt && now >= expiresAt);
+  const live = purchase?.funding?.quoteFreshness === "live" && !expired;
+  const prepared = purchase?.unsignedTransaction === "prepared" && live;
 
-  return (
-    <main className="mx-auto grid min-h-full max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-6">
-      <section>
-        <header className="mb-6">
-          <p className="text-sm font-medium text-[#0f6e56]">SuperTab</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">What do you want to buy?</h1>
-          <p className="mt-2 max-w-xl text-stone-600">
-            Find a real product, then see whether the Solana assets you already hold can cover it. Merchants are paid by card, not by cryptocurrency.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs">
-            <Status label="Shopping assistant" value={health.gemini} />
-            <Status label="Gemini model" value={health.geminiModel} />
-            <Status label="Shopify" value={health.shopify} />
-            <Status label="eBay" value={health.ebay} />
-            <Status label="Solana" value={health.solana} />
-            <Status label="DFlow" value={health.dflow} />
-            <Status label="Payment card" value={railLabel(health.cardRail)} />
-          </div>
+  return <main className="app-shell">
+    <nav className="topbar" aria-label="Main navigation"><Link className="wordmark" href="/" aria-label="SuperTab home"><span className="brand-icon">s<span>↗</span></span>SuperTab<span className="beta">DEMO</span></Link><span className="demo-note"><span className="status-dot" />Explore freely. Money stays put.</span></nav>
+    <div className={`workspace ${purchase ? "has-review" : ""}`}>
+      <section className="shopping">
+        <header className={`hero ${session ? "compact" : ""}`}>
+          <p className="eyebrow">A little help finding your next favorite.</p>
+          <h1>{session ? "Find your next favorite." : <>Good finds.<br /><span>Powered by your wallet.</span></>}</h1>
+          {!session && <p className="hero-copy">Tell us what you’re looking for. SuperTab finds real products and helps you plan how to fund them with your Solana assets.</p>}
         </header>
-
-        <form onSubmit={search} className="rounded-3xl border border-[#e4d9c8] bg-[#fffdf8] p-3 shadow-sm">
-          <label className="sr-only" htmlFor="request">Shopping request</label>
-          <textarea
-            id="request"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            rows={3}
-            placeholder="Find me a black polo under $50."
-            className="w-full resize-none bg-transparent px-3 py-2 text-lg outline-none placeholder:text-stone-400"
-          />
-          <div className="flex items-center justify-between gap-3 px-2 pb-1">
-            <p className="text-sm text-stone-500">Follow-ups keep your earlier requirements.</p>
-            <button
-              type="submit"
-              disabled={busy || draft.trim().length === 0}
-              className="rounded-full bg-[#0f6e56] px-4 py-2 text-sm font-medium text-[#f4fff9] disabled:opacity-50"
-            >
-              {busy && draft.trim().length > 0 ? "Looking…" : "Search"}
-            </button>
-          </div>
-        </form>
-
-        {error ? <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</p> : null}
-
-        {session ? (
-          <div className="mt-6 space-y-4">
-            <p className="text-stone-800">{session.assistantMessage}</p>
-            <p className="text-sm text-stone-500">Requirements: {session.constraintsLabel}</p>
-            <div className="flex flex-wrap gap-2 text-xs text-stone-500">
-              {session.providers.map((provider) => (
-                <span key={provider.provider} className="rounded-full bg-white px-3 py-1">
-                  {provider.provider}: {provider.status}{provider.message ? ` — ${provider.message}` : ""}
-                </span>
-              ))}
-            </div>
-            {session.exact.length > 0 ? (
-              <div className="grid gap-3">
-                {session.exact.map((offer) => (
-                  <OfferCard key={offer.id} offer={offer} disabled={busy} onSelect={() => selectOffer(offer.id)} />
-                ))}
-              </div>
-            ) : null}
-            {session.excluded.length > 0 ? (
-              <div className="space-y-3">
-                <h2 className="text-lg font-medium">These miss a requirement</h2>
-                {session.excluded.map((item) => (
-                  <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} disabled />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
+        {!session && <div className="suggestions"><span>Try a little inspiration</span>{["Find me a black polo under $50.", "Find me running shoes under $120."].map(prompt => <button key={prompt} disabled={!!busy} onClick={() => setDraft(prompt)}>{prompt.replace("Find me ", "").replace(".", "")} <span aria-hidden="true">↗</span></button>)}</div>}
+        {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}<span className="loading-hint">Live providers can take a moment.</span></div>}
+        {error && <div className="notice warning" role="alert">{error}<button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div>}
+        {session ? <section className="results" aria-label="Shopping results" aria-busy={!!busy}>
+          <div className="conversation"><span className="assistant-mark">✦</span><div><p className="eyebrow">SUPERTAB FINDS</p><p>{session.assistantMessage}</p></div></div>
+          <div className="requirements"><span>Looking for</span><strong>{session.constraintsLabel}</strong></div>
+          <details className="conversation-history"><summary>Your conversation · {session.messages.filter(message => message.role === "user").length} requests</summary>{session.messages.map((message, index) => <p key={index}><strong>{message.role === "user" ? "You" : "SuperTab"}</strong> {message.text}</p>)}</details>
+          <div className="results-heading"><h2>{session.exact.length ? "Your shortlist" : "Let’s widen the search"}</h2><span>{session.exact.length} matches · real merchant listings</span></div>
+          {session.exact.length ? <div className="product-grid">{session.exact.map(offer => <OfferCard key={offer.id} offer={offer} selected={offer.id === session.selectedOfferId} disabled={!!busy} onSelect={() => void selectOffer(offer.id, walletMode, address, null)} />)}</div> : <div className="empty-state"><span>⌕</span><h3>No exact matches yet</h3><p>Try another color, a higher budget, or fewer requirements. We’ll keep the rest of your request.</p><button className="secondary" disabled={!!busy} onClick={() => { setDraft("Navy is fine too."); document.getElementById("request")?.focus(); }}>Try navy too</button></div>}
+          {session.excluded.length > 0 && <details className="excluded"><summary>{session.excluded.length} other listings · missing a requirement</summary><div className="product-grid">{session.excluded.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} />)}</div></details>}
+        </section> : <section className="intro-steps" aria-label="How SuperTab works"><div><span>01 / DISCOVER</span><h2>Ask for what you love.</h2><p>Real finds from Shopify and eBay, shaped around your preferences.</p></div><div><span>02 / PLAN</span><h2>Put your assets in context.</h2><p>See your USDC balance and a live conversion quote for the difference.</p></div><div><span>03 / REVIEW</span><h2>You stay in control.</h2><p>Review an unsigned transaction. This demo stops before money moves.</p></div></section>}
       </section>
-
-      <aside className="h-fit rounded-3xl border border-[#e4d9c8] bg-[#fffdf8] p-5 lg:sticky lg:top-6">
-        <h2 className="text-lg font-semibold">Purchase review</h2>
-        {!purchase ? (
-          <p className="mt-3 text-sm text-stone-600">Select a product to see the price we actually know, your spending assets, and whether a conversion is needed.</p>
-        ) : (
-          <div className="mt-4 space-y-5 text-sm">
-            <Block title="Product">
-              <Row label="Merchant" value={purchase.product.merchant ?? "Unknown"} />
-              <Row label="Product" value={purchase.product.title} />
-              <Row label="Variant" value={purchase.product.variant ?? "Not specified"} />
-              <Row label="Quantity" value={String(purchase.checkout.quantity)} />
-              <Row label="Source" value={purchase.product.source} />
-            </Block>
-            <Block title="Checkout">
-              <Row label="Item price" value={purchase.checkout.itemDisplay ? `${purchase.checkout.itemDisplay} ${purchase.checkout.itemKind ?? ""}` : "Unknown"} />
-              <Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Unknown"} />
-              <Row label="Tax" value={purchase.checkout.taxDisplay ?? "Unknown"} />
-              <Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} />
-              <Row label="Planning amount" value={purchase.funding?.planningDisplay ?? "Unknown"} />
-              <Row label="Final checkout total" value={purchase.finalTotal === "unknown" ? "Unknown" : purchase.checkout.merchantTotalDisplay ?? "Unknown"} />
-              <Row label="Currency" value={purchase.checkout.currency ?? "Unknown"} />
-              <p className="mt-2 text-stone-500">{purchase.checkout.note}</p>
-            </Block>
-            <Block title="Your spending assets">
-              <div className="mb-3 flex flex-wrap gap-2">
-                <button type="button" className={chip(walletMode === "sample")} onClick={() => { setWalletMode("sample"); setCanRequestSignature(false); const id = selectedId(session); if (id) void selectOffer(id, "sample", address, fundingMint); }}>Sample preview</button>
-                <button type="button" className={chip(walletMode === "address" && !canRequestSignature)} onClick={() => setWalletMode("address")}>Use an address</button>
-                <button type="button" className={chip(canRequestSignature)} onClick={() => void connectWallet()} disabled={busy}>{browserWallet ? `Connect ${browserWallet.name}` : "Connect wallet"}</button>
-              </div>
-              {walletMode === "sample" ? <p className="mb-2 text-amber-800">Sample preview. These are not your assets.</p> : null}
-              {walletMode === "address" ? (
-                <form className="mb-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); const id = selectedId(session); if (id) void selectOffer(id, "address", address, fundingMint); }}>
-                  <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Solana address" className="min-w-0 flex-1 rounded-xl border border-[#e4d9c8] px-3 py-2" />
-                  <button className="rounded-xl bg-stone-900 px-3 py-2 text-white" type="submit">Look up</button>
-                </form>
-              ) : null}
-              <p className="mb-2 text-stone-500">Signature: {canRequestSignature ? "Available, not requested" : "Disabled"}</p>
-              {purchase.balanceError ? <p className="text-amber-800">{purchase.balanceError}</p> : null}
-              {purchase.assets.length === 0 ? <p className="text-stone-500">No spending assets loaded.</p> : (
-                <ul className="space-y-1">
-                  {purchase.assets.map((asset) => (
-                    <li key={asset.mint} className="flex items-center justify-between gap-3">
-                      <span>{asset.symbol ?? "Token"}{asset.isUsdc ? "" : ""}</span>
-                      <span>{asset.amountDisplay}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {purchase.assets.some((asset) => !asset.isUsdc && asset.kind !== "native") ? (
-                <label className="mt-3 block text-stone-600">
-                  Funding asset
-                  <select
-                    className="mt-1 w-full rounded-xl border border-[#e4d9c8] bg-white px-3 py-2"
-                    value={fundingMint ?? ""}
-                    onChange={(event) => {
-                      const mint = event.target.value || null;
-                      setFundingMint(mint);
-                      const id = selectedId(session);
-                      if (id) void selectOffer(id, walletMode, address, mint);
-                    }}
-                  >
-                    <option value="">Suggest SOL if it can help</option>
-                    {purchase.assets.filter((asset) => !asset.isUsdc).map((asset) => (
-                      <option key={asset.mint} value={asset.mint}>{asset.symbol ?? asset.mint}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-            </Block>
-            <Block title="Funding">
-              {purchase.funding ? (
-                <>
-                  <Row label="Planning amount" value={purchase.funding.planningDisplay ?? "Unknown"} />
-                  <Row label="Existing USDC" value={purchase.funding.existingUsdc} />
-                  <Row label="USDC to use" value={purchase.funding.usdcUsed} />
-                  <Row label="Still needed" value={purchase.funding.deficit} />
-                  <Row label="Funding asset" value={purchase.funding.candidateSymbol ?? "None selected"} />
-                  <Row label="DFlow quote" value={quoteLabel(purchase.funding.quoteFreshness)} />
-                  <Row label="Unsigned transaction" value={purchase.unsignedTransaction === "prepared" ? "Prepared, awaiting approval" : "Not requested"} />
-                  <Row label="Amount to convert" value={purchase.funding.requiredInput ?? "Not quoted"} />
-                  <Row label="Expected USDC" value={purchase.funding.expectedOutput ?? "Not quoted"} />
-                  <Row label="Price impact" value={purchase.funding.priceImpact ?? "Not reported"} />
-                  <Row label="Slippage" value={purchase.funding.slippageBps == null ? "Not reported" : `${purchase.funding.slippageBps} bps`} />
-                  <Row label="Fee" value={purchase.funding.platformFee ?? "Not reported"} />
-                  <Row label="Quote expires" value={purchase.funding.quoteExpiresAt ?? "No live quote"} />
-                  <ul className="mt-2 space-y-1 text-stone-500">
-                    {purchase.funding.notes.slice(0, 4).map((note) => <li key={note}>{note}</li>)}
-                  </ul>
-                </>
-              ) : <p>Funding has not been calculated.</p>}
-            </Block>
-            <Block title="Payment rail">
-              <Row label="Preferred provider" value={purchase.cardRail.preferredProvider ?? "None"} />
-              <Row label="Status" value={railLabel(purchase.cardRail.access)} />
-              <p className="mt-2 text-stone-600">{purchase.cardRail.message}</p>
-              <p className="mt-2 text-stone-500">No card number is shown. Financial execution is disabled.</p>
-            </Block>
-            <Block title="Financial actions">
-              <Row label="This purchase" value={purchase.purchaseApproval === "approved" ? "Approved" : purchase.purchaseApproval === "expired" ? "Expired" : "Approval required"} />
-              <Row label="Payment" value={purchase.paymentStatus.replaceAll("_", " ").toLowerCase()} />
-              <Row label="Order" value={purchase.orderStatus.replaceAll("_", " ").toLowerCase()} />
-              <Row label="Purchase state" value={purchase.state.replaceAll("_", " ").toLowerCase()} />
-              {purchase.swapApproval ? <p className="mt-2 text-stone-600">Approval recorded {purchase.swapApproval.at}. Nothing was swapped.</p> : null}
-              {purchase.state === "SWAP_QUOTE_READY" || purchase.state === "AWAITING_SWAP_APPROVAL" ? (
-                <button type="button" onClick={() => void approve()} disabled={busy} className="mt-3 w-full rounded-full bg-stone-900 px-4 py-2 text-white disabled:opacity-50">
-                  Approve conversion
-                </button>
-              ) : null}
-              <button type="button" onClick={() => void approvePurchase()} disabled={busy || purchase.purchaseApproval === "approved"} className="mt-3 w-full rounded-full border border-stone-300 px-4 py-2 disabled:opacity-50">
-                Approve this purchase
-              </button>
-              <p className="mt-2 text-stone-500">Approving records this purchase only. SuperTab will not sign, swap, or pay.</p>
-            </Block>
-          </div>
-        )}
-      </aside>
-    </main>
-  );
+      {purchase && <aside className="purchase-review" ref={reviewRef} aria-label="Purchase review" aria-busy={!!busy}>
+        <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Let’s make a plan.</h2><span className="badge">Purchase review</span></div>
+        <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
+        <div className="price-summary"><span>Item {purchase.checkout.itemKind === "catalog" ? "catalog" : "listing"} price</span><strong>{purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · final total pending</p></div>
+        <div className="notice subtle"><strong>Final checkout total unknown</strong><p>Final shipping and tax need merchant confirmation. This plan includes only the prices currently known.</p></div>
+        <details className="review-details"><summary>Price breakdown</summary><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
+        <Block step="1" title="Your spending assets"><p className="section-copy">Read your wallet to see how this purchase could be funded.</p>
+          <div className="wallet-actions"><button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "address", DEMO_ADDRESS, null)}>Use real demo wallet <span>Read-only</span></button><div className="wallet-options"><button disabled={!!busy} onClick={() => setShowAddressInput(value => !value)}>Enter address</button><button disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button><button disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "sample", "", null)}>Sample preview</button></div></div>
+          {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}
+          <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
+          {purchase.walletKind === "sample" && <p className="sample-note">Illustrative balances, not your assets. No transaction is prepared for a sample wallet.</p>}
+          {purchase.balanceError && <p className="inline-error" role="alert">We couldn’t read this wallet. {purchase.balanceError}</p>}
+          {purchase.assets.length > 0 && <div className="assets">{purchase.assets.filter(asset => asset.isUsdc || asset.kind === "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? "Token"} value={asset.amountDisplay} />)}{purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <details className="review-details"><summary>Other tokens in this wallet</summary>{purchase.assets.filter(asset => !asset.isUsdc && asset.kind !== "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? maskAddress(asset.mint)} value={asset.amountDisplay} />)}<p>Unrecognized tokens are shown by mint address. They have no assumed dollar value or guaranteed conversion route.</p></details>}</div>}
+          {purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <label className="asset-select">Use an asset for the difference<select disabled={!!busy} value={fundingMint ?? ""} onChange={event => void selectOffer(session!.selectedOfferId!, walletMode, address, event.target.value || null)}><option value="">Suggest SOL</option>{purchase.assets.filter(asset => !asset.isUsdc).map(asset => <option key={asset.mint} value={asset.mint}>{asset.symbol ?? asset.mint}</option>)}</select></label>}
+        </Block>
+        <Block step="2" title="Cover the difference">
+          {purchase.balanceSource === "none" || purchase.balanceSource === "error" ? <p className="section-copy">Your funding plan appears once real or sample assets are loaded.</p> : purchase.funding ? <>
+            <div className="funding-math"><Row label="Planning amount" value={purchase.funding.planningDisplay ?? "Unknown"} /><Row label="USDC available" value={purchase.funding.existingUsdc} /><div className="deficit"><span>{purchase.funding.readiness === "covered_by_usdc" ? "Covered by your USDC" : "Still needed"}</span><strong>{spendingGap(purchase.funding.deficit)}</strong></div></div>
+            {purchase.funding.readiness !== "covered_by_usdc" && <div className={`quote-box ${live ? "is-live" : ""}`}><div className="quote-heading"><span className="badge">{live ? "● Live DFlow quote" : expired || purchase.funding.quoteFreshness === "stale" ? "Quote expired" : "Quote unavailable"}</span>{live && <span className="countdown">{Math.max(0, Math.ceil((expiresAt - now) / 1000))}s left</span>}</div>
+              {live ? <><p>{purchase.funding.fundable ? `Use ${purchase.funding.candidateSymbol ?? "your asset"} to cover the difference` : "Your available asset does not cover this purchase yet."}</p><div className="conversion"><strong>{purchase.funding.requiredInput}</strong><span>↓</span><strong>{purchase.funding.expectedOutput}</strong></div><small>Minimum received: {purchase.funding.minimumOutput ?? "Not reported"}</small>{!purchase.funding.fundable && <p className="inline-error">This live quote is below the funding gap. Choose a lower-priced product or another funding asset. No transaction will be prepared.</p>}</> : <p>{expired ? "Markets move. Refresh your quote to prepare a current transaction for this same product." : "A live conversion is not available right now. Your product and wallet stay here; try refreshing or choose another asset."}</p>}
+              <button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, walletMode, address, fundingMint)}>{busy ? "Preparing…" : "Refresh funding quote"} <span aria-hidden="true">↻</span></button>
+            </div>}
+            <details className="review-details"><summary>Conversion details & network reserve</summary><Row label="Exact funding gap" value={purchase.funding.deficit} /><Row label="Price impact" value={live ? purchase.funding.priceImpact ?? "Not reported" : "Refresh quote"} /><Row label="Slippage tolerance" value={purchase.funding.slippageBps == null ? "Not reported" : `${purchase.funding.slippageBps / 100}%`} /><Row label="SOL kept for fees" value={purchase.funding.reserve} /><Row label="Platform fee" value={purchase.funding.platformFee ?? "Not reported"} /><ul>{purchase.funding.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
+          </> : <p>Funding is temporarily unavailable. Your selected product is preserved.</p>}
+        </Block>
+        <Block step="3" title="You approve the next step"><div className={`approval-state ${prepared ? "ready" : ""}`}><span className="badge">{prepared ? "Transaction prepared" : expired ? "Refresh required" : "Swap not executed"}</span><h3>{prepared ? "Ready for your approval" : purchase.walletKind === "sample" ? "This is a sample preview" : live && !purchase.funding?.fundable ? "More funding needed." : live ? "Quote ready. Transaction not prepared." : "Your money stays in your wallet."}</h3><p>{prepared ? "A real unsigned transaction has been prepared and its format checked. It would convert the asset amount above into USDC, subject to the quote’s minimum received and slippage." : live && !purchase.funding?.fundable ? "This asset cannot cover the full funding gap while preserving the network reserve." : live ? "A live quote is available. Use a real wallet and refresh to try preparing an unsigned transaction." : "No swap has been signed or broadcast."}</p>{prepared && <strong className="approval-label">AWAITING USER APPROVAL</strong>}<p className="section-copy">Wallet signing and financial execution are disabled in this demo. Swap not executed.</p></div></Block>
+        <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ wallet-backed CardRail → merchant</div><span className="badge">Card rail not connected</span><p>Preferred integration: Bridge + Stripe Issuing. Sandbox access is blocked; no card has been issued. Merchant order creation is not implemented.</p><div className="end-states"><span>Payment not executed</span><span>Order not created</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
+      </aside>}
+    </div>
+    <footer><span>SuperTab · AI shopping, powered by what you hold.</span><details><summary>Live services & demo status</summary>{health ? <div><p>Assistant: {health.gemini === "configured" ? health.geminiModel : "Not configured"}</p><p>Shopify: {health.shopify} · eBay: {health.ebay}</p><p>Solana: {health.solana} · DFlow: {["live_quote", "available", "authenticated"].includes(health.dflow) ? "Available at last check" : "Temporarily unavailable"}</p><p>CardRail not connected · financial execution disabled</p></div> : <p>Checking live services…</p>}</details></footer>
+  </main>;
 }
 
-function OfferCard({ offer, onSelect, disabled, reasons }: { offer: OfferView; onSelect?: () => void; disabled?: boolean; reasons?: string[] }) {
-  return (
-    <article className="flex gap-4 rounded-3xl border border-[#e4d9c8] bg-white p-4">
-      <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-stone-100">
-        {offer.imageUrl ? (
-          // Merchant image hosts are unknown until search time, so this is not a next/image remote pattern.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={offer.imageUrl} alt={offer.title} className="h-full w-full object-cover" />
-        ) : null}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="font-medium leading-snug">{offer.title}</h3>
-          <p className="shrink-0 font-medium">{offer.priceDisplay ?? "Price unknown"}</p>
-        </div>
-        <p className="mt-1 text-sm text-stone-500">
-          {[offer.merchant ?? "Merchant unknown", offer.variantLabel, offer.condition, stockLabel(offer.availability), offer.source].filter(Boolean).join(" · ")}
-        </p>
-        <p className="mt-1 text-sm text-stone-500">{offer.shippingSummary ?? "Shipping unknown"} · {offer.checkoutLabel}</p>
-        {reasons ? <p className="mt-2 text-sm text-amber-800">{reasons.join(" ")}</p> : null}
-        {onSelect ? (
-          <button type="button" disabled={disabled} onClick={onSelect} className="mt-3 rounded-full border border-stone-300 px-3 py-1.5 text-sm disabled:opacity-50">
-            Select
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
+function OfferCard({ offer, selected, disabled, onSelect, reasons }: { offer: OfferView; selected?: boolean; disabled?: boolean; onSelect?: () => void; reasons?: string[] }) {
+  return <article className={`product-card ${selected ? "selected" : ""}`}><div className="product-image-wrap"><ProductImage offer={offer} /><span className="source-tag">{offer.source === "shopify" ? "Shopify" : "eBay"}</span>{selected && <span className="selected-tag">✓ Selected</span>}</div><div className="product-info"><p className="merchant">{offer.merchant ?? "Independent merchant"}</p><h3>{offer.title}</h3><p className="variant">{[offer.variantLabel, offer.condition].filter(Boolean).join(" · ") || "Variant not specified"}</p><div className="product-price"><strong>{offer.priceDisplay ?? "Price unknown"}</strong><span>{offer.availability === "in_stock" ? "In stock" : "Stock unconfirmed"}</span></div><p className="price-note">{offer.priceKind === "catalog" ? "Catalog" : "Listing"} price · shipping & tax may apply</p>{reasons && <p className="inline-error">{reasons.join(" ")}</p>}{onSelect && <button className={selected ? "secondary" : "primary"} disabled={disabled} onClick={onSelect}>{selected ? "Review selected product" : "Make a purchase plan"}<span aria-hidden="true">↗</span></button>}</div></article>;
 }
-
-function Status({ label, value }: { label: string; value: string }) {
-  return <span className="rounded-full bg-white px-3 py-1 text-stone-600">{label}: {value.replaceAll("_", " ")}</span>;
+function ProductImage({ offer }: { offer: OfferView }) {
+  const [failed, setFailed] = useState(false);
+  return <div className="product-image">{offer.imageUrl && !failed ?
+    // Real merchant hosts are only known at search time.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={offer.imageUrl} alt={offer.title} loading="lazy" onError={() => setFailed(true)} /> : <span className="image-fallback">↗<small>Image unavailable</small></span>}</div>;
 }
-
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  return <section><h3 className="font-medium">{title}</h3><div className="mt-2 space-y-1">{children}</div></section>;
+function Row({ label, value }: { label: string; value: string }) { return <div className="detail-row"><span>{label}</span><strong>{value}</strong></div>; }
+function Block({ step, title, children }: { step: string; title: string; children: ReactNode }) { return <section className="review-block"><h3><span className="step-number">{step}</span>{title}</h3>{children}</section>; }
+function maskAddress(value: string) { return `${value.slice(0, 4)}…${value.slice(-4)}`; }
+function spendingGap(value: string) {
+  const match = /^(\d+)(?:\.(\d+))? USDC$/.exec(value);
+  if (!match) return value;
+  const base = BigInt(match[1]!) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
+  const cents = (base + 9_999n) / 10_000n;
+  return `${base % 10_000n ? "≈ " : ""}${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")} USDC`;
 }
-
-function Row({ label, value }: { label: string; value: string }) {
-  return <p className="flex justify-between gap-3"><span className="text-stone-500">{label}</span><span className="text-right">{value}</span></p>;
-}
-
-function chip(active: boolean): string {
-  return `rounded-full px-3 py-1 ${active ? "bg-stone-900 text-white" : "bg-stone-100"}`;
-}
-
-function stockLabel(availability: OfferView["availability"]): string {
-  if (availability === "in_stock") return "In stock";
-  if (availability === "out_of_stock") return "Out of stock";
-  return "Stock unknown";
-}
-
-function railLabel(access: string): string {
-  if (access === "sandbox_live") return "Sandbox live";
-  if (access === "sandbox_blocked") return "Sandbox blocked";
-  if (access === "sandbox_configured") return "Sandbox configured";
-  if (access === "sandbox_not_configured") return "Sandbox not configured";
-  return "Provider not connected";
-}
-
-function quoteLabel(freshness: string): string {
-  if (freshness === "live") return "Live quote";
-  if (freshness === "stale") return "Expired";
-  if (freshness === "mismatched") return "Does not match this purchase";
-  return "Not requested";
-}
-
-function selectedId(session: SessionView | null): string | null {
-  return session?.selectedOfferId ?? null;
+function walletLabel(purchase: PurchaseView) {
+  if (purchase.balanceSource === "error") return "Wallet read unavailable";
+  if (purchase.walletKind === "sample") return "Sample preview";
+  if (purchase.walletKind === "read_only") return "Read-only real wallet";
+  if (purchase.walletKind === "connected") return "Connected wallet";
+  return "No wallet selected";
 }

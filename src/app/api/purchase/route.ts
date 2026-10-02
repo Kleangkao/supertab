@@ -12,11 +12,14 @@ export async function POST(request: Request) {
       walletMode?: unknown;
       address?: unknown;
       fundingMint?: unknown;
+      signatureAvailable?: unknown;
     };
     if (typeof body.sessionId !== "string" || typeof body.offerId !== "string") {
       return Response.json({ error: "Choose a product from the current search." }, { status: 400 });
     }
-    const walletMode = body.walletMode === "sample" || body.walletMode === "address" ? body.walletMode : "none";
+    const walletMode = body.walletMode === "sample" || body.walletMode === "address" || body.walletMode === "connected"
+      ? body.walletMode
+      : "none";
     const view = await getShoppingService().review({
       sessionId: body.sessionId,
       offerId: body.offerId,
@@ -24,6 +27,7 @@ export async function POST(request: Request) {
       walletMode,
       address: typeof body.address === "string" ? body.address : undefined,
       fundingMint: typeof body.fundingMint === "string" ? body.fundingMint : null,
+      signatureAvailable: walletMode === "connected" && body.signatureAvailable === true,
     });
     return Response.json(view);
   } catch (error) {
