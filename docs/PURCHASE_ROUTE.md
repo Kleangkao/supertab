@@ -27,11 +27,23 @@ The create-order reference still has a physical `productLocator`, and its descri
 
 Agent Checkouts, which now occupies the old Shopify guide URL, runs in production only. Its payment methods are cards and merchant methods such as Shop Pay. It does not show Solana wallet funding. Source: https://docs.crossmint.com/payments/headless/guides/providers/shopify and https://docs.crossmint.com/llms.txt as fetched October 4, 2026.
 
+## Next route: Solana Pay on Shopify
+
+Checked October 4, 2026 against the current MoonPay Commerce Solana Pay plugin page. This is the buyer-controlled route: the shopper pays from a Solana wallet, settlement defaults to USDC, and MoonPay Commerce does not custody the funds. A paid charge becomes a Shopify order only after the plugin reports `Completed`. The merchant portal and Helio API expose that link as `ShopifyPaymentGid`. Refunds are a separate merchant-approved wallet transaction.
+
+That route is externally blocked before a quote:
+
+- True Classic's previously checked checkout did not list Solana Pay. Activating it is a merchant action: install the app, accept its terms, complete KYB, and set a payout wallet.
+- No Helio or MoonPay API key is configured. `demo.hel.io` only embeds a paylink the merchant creates. The dev dashboard can make a Devnet paylink, and that still requires the owner's login.
+- Without that merchant key, SuperTab cannot independently read the Shopify order after a wallet payment.
+
+Missing access, in order: a store that has Solana Pay enabled, then a Helio API credential for that store that can read `ShopifyPaymentGid`. Do not install the app, accept its terms, or complete KYB from here.
+
 ## Other routes still blocked
 
 | Route | Status |
 | --- | --- |
-| Solana Pay handoff | True Classic checkout handlers that were checked were card and Google Pay. No new merchant with a readable Solana Pay order was found. |
+| Solana Pay handoff | Blocked on merchant activation and a Helio read credential, as above. |
 | Issuer card | Immersve published sandbox keys returned `API_KEY_DISABLED`. Bridge has no sandbox key. A card sandbox would still not be this merchant order. |
 | x402 | No True Classic x402 payment request exists. |
 
