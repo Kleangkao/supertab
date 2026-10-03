@@ -34,7 +34,7 @@ Checked October 4, 2026 against the current MoonPay Commerce Solana Pay plugin p
 That route is externally blocked before a quote:
 
 - True Classic's previously checked checkout did not list Solana Pay. Activating it is a merchant action: install the app, accept its terms, complete KYB, and set a payout wallet.
-- No Helio or MoonPay API key is configured. `demo.hel.io` only embeds a paylink the merchant creates. The dev dashboard can make a Devnet paylink, and that still requires the owner's login.
+- No Helio or MoonPay API key is configured. On October 4, `GET https://api.dev.hel.io/v1/currency` returned HTTP 200 without a key and included USDC on SOL. `GET https://api.dev.hel.io/v1/paylink` returned HTTP 401 `Unauthorized`. The public currency list is not payment access. `demo.hel.io` only embeds a paylink the merchant creates. The dev dashboard can make a Devnet paylink, and that still requires the owner's login.
 - Without that merchant key, SuperTab cannot independently read the Shopify order after a wallet payment.
 
 Missing access, in order: a store that has Solana Pay enabled, then a Helio API credential for that store that can read `ShopifyPaymentGid`. Do not install the app, accept its terms, or complete KYB from here.
