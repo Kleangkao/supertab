@@ -97,6 +97,7 @@ export interface PurchaseView {
   transactionVersion: "legacy" | "v0" | null;
   balanceSource: "none" | "sample" | "chain" | "error";
   balanceError: string | null;
+  balanceExpiresAt: string | null;
   assets: AssetView[];
   cardRail: {
     availability: "not_connected" | "unavailable" | "ready";

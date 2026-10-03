@@ -4,11 +4,23 @@ import { planFunding } from "../src/lib/funding-planner";
 import { USDC_MINT } from "../src/lib/tokens";
 import type { PayableSnapshot } from "../src/lib/offers";
 
+it("rejects test-network funding balances before reading any wallet account", async () => {
+  const methods: string[] = [];
+  await expect(readSolanaBalances("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg", {
+    rpcUrl: "https://rpc.test", fetchImpl: async (_input, init) => {
+      const body = JSON.parse(String(init?.body)); methods.push(body.method);
+      return Response.json({ result: body.method === "getGenesisHash" ? "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" : { value: [] } });
+    },
+  })).rejects.toThrow(/mainnet/);
+  expect(methods).toEqual(["getGenesisHash"]);
+});
+
 it("rejects conflicting decimals rather than combining incompatible balances", async () => {
   await expect(readSolanaBalances("vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg", {
     rpcUrl: "https://rpc.test",
     fetchImpl: async (_input, init) => {
       const body = JSON.parse(String(init?.body));
+      if (body.method === "getGenesisHash") return Response.json({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" });
       if (body.method === "getBalance") return Response.json({ result: { value: 20_000_000 } });
       const decimals = body.params[1].programId.startsWith("Tokenkeg") ? 6 : 9;
       return Response.json({ result: { value: [{ account: { data: { parsed: { info: {
@@ -23,6 +35,7 @@ it("counts all canonical USDC accounts in the real wallet funding path", async (
     rpcUrl: "https://rpc.test",
     fetchImpl: async (_input, init) => {
       const body = JSON.parse(String(init?.body));
+      if (body.method === "getGenesisHash") return Response.json({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" });
       if (body.method === "getBalance") return Response.json({ result: { value: 20_000_000 } });
       const entries = body.params[1].programId.startsWith("Tokenkeg") ? ["5000000", "7000000"] : [];
       return Response.json({ result: { value: entries.map(amount => ({

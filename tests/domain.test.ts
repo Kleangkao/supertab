@@ -737,6 +737,7 @@ describe("wallet modes", () => {
         }
         if (url.includes("mainnet-beta.solana.com")) {
           const body = JSON.parse(String(init?.body)) as { method?: string };
+          if (body.method === "getGenesisHash") return Promise.resolve(Response.json({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" }));
           if (body.method === "getBalance") return Promise.resolve(Response.json({ result: { value: 500_000_000 } }));
           return Promise.resolve(Response.json({ result: { value: [] } }));
         }

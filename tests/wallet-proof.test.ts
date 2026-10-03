@@ -60,7 +60,7 @@ async function connectedSession() {
     now: () => new Date(nowMs), fetchImpl: async (input, init) => {
       if (String(input).includes("rpc.test")) {
         const body = JSON.parse(String(init?.body));
-        return Response.json({ result: body.method === "getBalance" ? { value: 0 } : { value: [] } });
+        return Response.json({ result: body.method === "getGenesisHash" ? "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" : body.method === "getBalance" ? { value: 0 } : { value: [] } });
       }
       return Response.json({ result: { structuredContent: { products: [{ id: "polo", title: "Black polo", variants: [{
         id: "gid://shopify/ProductVariant/1", title: "Black polo", price: { amount: 1000, currency: "USD" },

@@ -9,6 +9,7 @@ import {
 
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+export const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 
 export interface WalletProvider {
   getNetwork(): { cluster: string; rpc: "default_public" | "custom" };
@@ -69,6 +70,10 @@ export async function readSolanaBalances(
   if (!isPlausibleAddress(address)) throw new Error("That does not look like a Solana address.");
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 12_000;
+  const genesis = await rpcCall<string>(options.rpcUrl, "getGenesisHash", [], fetchImpl, timeoutMs);
+  if (genesis !== MAINNET_GENESIS_HASH) {
+    throw new Error("Shopping funding requires Solana mainnet. This RPC reports a different network; its balances were not used.");
+  }
   const [lamports, tokenAccounts, token2022] = await Promise.all([
     rpcCall<number | { value?: number }>(options.rpcUrl, "getBalance", [address.trim()], fetchImpl, timeoutMs),
     rpcCall<{ value?: unknown[] }>(

@@ -143,6 +143,7 @@ describe("checkout, funding and approval integration", () => {
       if (String(url).includes("merchant.test")) return Response.json({ result: { structuredContent: response } });
       if (String(url).includes("solana.com")) {
         const request = JSON.parse(String(init?.body));
+        if (request.method === "getGenesisHash") return Response.json({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" });
         if (request.method === "getBalance") return Response.json({ result: { value: 20_000_000 } });
         return Response.json({ result: { value: request.params[1].programId.startsWith("Tokenkeg") ? [{ account: { data: { parsed: { info: {
           mint: USDC_MINT, tokenAmount: { amount: "12000000", decimals: 6 },
@@ -173,6 +174,24 @@ describe("checkout, funding and approval integration", () => {
     const expired = service.getSession(search.sessionId);
     expect(expired.purchase).toMatchObject({ finalTotal: "unknown", purchaseApproval: "required", unsignedTransaction: "not_requested" });
     await expect(service.approvePurchase(search.sessionId, verified.purchase!.termsId)).rejects.toThrow(/final.*checkout total/);
+  });
+
+  it("expires wallet funding independently of a still-current merchant total", async () => {
+    const { service, advance } = setup();
+    const search = await service.converse(null, "Find me a black polo under $50");
+    const selection = { sessionId: search.sessionId, offerId: search.exact[0]!.id,
+      walletMode: "address" as const, address: "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg" };
+    const review = await service.review(selection);
+    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId, BUYER_IP);
+    await service.approvePurchase(search.sessionId, verified.purchase!.termsId);
+    advance(60_000);
+    const stale = service.getSession(search.sessionId);
+    expect(stale.purchase).toMatchObject({ finalTotal: "verified", balanceSource: "error", assets: [],
+      funding: null, purchaseApproval: "required", paymentStatus: "PAYMENT_APPROVAL_REQUIRED", unsignedTransaction: "not_requested" });
+    expect(stale.purchase!.termsId).not.toBe(verified.purchase!.termsId);
+    const fresh = await service.review(selection);
+    expect(fresh.purchase).toMatchObject({ finalTotal: "verified", balanceSource: "chain", purchaseApproval: "required" });
+    expect(fresh.purchase!.assets.length).toBeGreaterThan(0);
   });
 
   it("clears verification and approval if a fresh merchant read fails", async () => {

@@ -33,6 +33,8 @@ import { createWalletChallenge, verifyWalletChallenge, type WalletChallenge } fr
 import { prepareDevnetCheck, verifyDevnetCheck } from "./devnet-signing";
 import type { DevnetSigningCheck } from "./devnet-memo";
 
+export const BALANCE_FRESHNESS_MS = 60_000;
+
 export interface ShoppingDependencies {
   config: AppConfig;
   fetchImpl?: typeof fetch;
@@ -60,6 +62,7 @@ interface SessionRecord {
   balances: AssetBalance[];
   balanceSource: PurchaseView["balanceSource"];
   balanceError: string | null;
+  balanceReadAtMs: number | null;
   snapshot: PayableSnapshot | null;
   checkoutEvidence: CheckoutEvidence | null;
   termsId: string;
@@ -325,8 +328,9 @@ export class ShoppingService {
 
   async approve(sessionId: string): Promise<SessionView> {
     const session = this.requireSession(sessionId);
+    this.view(session);
     if (session.state !== "SWAP_QUOTE_READY" && session.state !== "AWAITING_SWAP_APPROVAL") {
-      throw new Error("There is no live conversion quote to approve.");
+      throw new Error("There is no current conversion quote to approve. Refresh your funding plan.");
     }
     if (quoteIsUsable(session.quote, session.snapshot ? knownPlanningMinor(session.snapshot) : null, session.quote?.inputMint ?? null, this.nowMs()) !== "live") {
       throw new Error("The conversion quote expired. Refresh it before reviewing approval.");
@@ -458,6 +462,7 @@ export class ShoppingService {
   }
 
   private async loadBalances(session: SessionRecord, address: string | undefined): Promise<void> {
+    session.balanceReadAtMs = null;
     session.balanceError = null;
     if (session.walletMode === "sample") {
       session.walletAddress = null;
@@ -476,6 +481,7 @@ export class ShoppingService {
         session.balances = await wallet.getBalances(address.trim());
         session.walletAddress = address.trim();
         session.balanceSource = "chain";
+        session.balanceReadAtMs = this.nowMs();
         if (wallet.prepareTransaction().status !== "disabled" || wallet.requestSignature().status !== "disabled") {
           throw new Error("Wallet signing must stay disabled.");
         }
@@ -543,6 +549,15 @@ export class ShoppingService {
 
   private view(session: SessionRecord): SessionView {
     const offer = this.selectedOffer(session);
+    if (session.balanceSource === "chain" && (session.balanceReadAtMs == null || this.nowMs() >= session.balanceReadAtMs + BALANCE_FRESHNESS_MS)) {
+      session.balanceSource = "error";
+      session.balanceError = "Wallet balances expired. Refresh your wallet to review current funds.";
+      session.balances = []; session.plan = null; session.quote = null;
+      session.purchaseIntent = null; session.swapApproval = null;
+      session.walletChallenge = null; session.walletProof = null; session.devnetCheck = null; session.devnetSigning = null;
+      session.unsignedTransaction = "not_requested"; session.transactionVersion = null;
+      session.termsId = crypto.randomUUID(); session.state = "CHECKOUT_READY";
+    }
     if (session.checkoutEvidence && this.nowMs() >= session.checkoutEvidence.expiresAtMs) {
       session.checkoutEvidence = null;
       session.snapshot = offer ? payableFromOffer(offer, session.quantity) : null;
@@ -602,6 +617,8 @@ export class ShoppingService {
         transactionVersion: session.transactionVersion,
         balanceSource: session.balanceSource,
         balanceError: session.balanceError,
+        balanceExpiresAt: session.balanceSource === "chain" && session.balanceReadAtMs != null
+          ? new Date(session.balanceReadAtMs + BALANCE_FRESHNESS_MS).toISOString() : null,
         assets: session.balances.map(toAssetView),
         cardRail: {
           availability: rail.availability,
@@ -657,6 +674,7 @@ function emptySession(id: string): SessionRecord {
     balances: [],
     balanceSource: "none",
     balanceError: null,
+    balanceReadAtMs: null,
     snapshot: null,
     checkoutEvidence: null,
     termsId: crypto.randomUUID(),

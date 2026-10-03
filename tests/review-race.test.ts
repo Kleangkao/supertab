@@ -12,6 +12,7 @@ it("cannot restore old wallet balances after a newer clear-wallet review", async
     fetchImpl: async (input, init) => {
       if (String(input).includes("rpc.test")) {
         const request = JSON.parse(String(init?.body));
+        if (request.method === "getGenesisHash") return Response.json({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" });
         if (request.method === "getBalance") {
           entered(); await pending;
           return Response.json({ result: { value: 5_000_000 } });

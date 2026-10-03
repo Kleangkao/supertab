@@ -98,7 +98,7 @@ async function fixture(onDevnet?: () => Promise<Response>) {
     fetchImpl: async (url, init) => {
       const body = JSON.parse(String(init?.body));
       if (String(url) === "https://api.devnet.solana.com") { methods.push(body.method); return onDevnet ? onDevnet() : blockhashResponse(); }
-      if (String(url).includes("rpc.test")) return Response.json({ result: body.method === "getBalance" ? { value: 0 } : { value: [] } });
+      if (String(url).includes("rpc.test")) return Response.json({ result: body.method === "getGenesisHash" ? "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" : body.method === "getBalance" ? { value: 0 } : { value: [] } });
       return Response.json({ result: { structuredContent: { products: [{ id: "polo", title: "Black polo", variants: [{
         id: "gid://shopify/ProductVariant/1", title: "Black polo", price: { amount: 1000, currency: "USD" }, availability: { available: true },
       }] }] } } });

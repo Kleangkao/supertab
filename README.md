@@ -46,6 +46,8 @@ See [the demo script and capability matrix](docs/DEMO.md) for a concise presenta
 
 Balances and prices change. During the October 2, 2026 verification, the demo wallet held about 0.057 SOL and 0.000004 USDC. After reserving 0.01 SOL, DFlow quoted about 5.73 USDC of funding capacity. The $27 polo was correctly insufficient; following up with “Under $5 please.” found a real $4 Shopify polo that reached unsigned preparation. Do not imply a more expensive item is fundable or top up this wallet as part of automated demo work.
 
+Real wallet balance reads expire after one minute. The browser immediately hides expired balances and funding evidence; server reads and approval requests invalidate stale funding, approvals and signing diagnostics. **Refresh wallet balances** reads the address again and requires a new review. A still-current merchant checkout total is preserved. Even a fresh balance read is a snapshot, not a reservation of funds.
+
 Sample preview uses illustrative balances and never prepares a transaction. Wallet connection requires a supported browser extension; a restored connected session is displayed as read-only until reconnected. Sessions are held in server memory: a page refresh recovers them, while a server restart requires a new search. Structural transaction validation is not execution simulation or verification of every program’s semantics.
 
 ## Requirements
@@ -75,6 +77,7 @@ Open http://localhost:3000.
 | `GEMINI_API_KEY` | Gemini shopping understanding. Without it, SuperTab uses a deterministic parser. |
 | `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` | eBay listing search. |
 | `SOLANA_RPC_URL` | Optional. Blank uses public mainnet. |
+| `SOLANA_CLUSTER` | Shopping funding uses mainnet. The RPC genesis hash must match mainnet even if configuration labels it otherwise. Devnet signing diagnostics use their own fixed endpoint. |
 | `DFLOW_QUOTE_BASE_URL` | Defaults to the DFlow dev quote API, which does not need a key. |
 | `DFLOW_API_KEY` | Only if you point quotes at a key-gated DFlow host. |
 | `SHOPIFY_CATALOG_ENABLED` | Shopify discovery is on by default and needs no secret. |

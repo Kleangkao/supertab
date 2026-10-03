@@ -228,7 +228,13 @@ export function ShopApp() {
     } finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
-  const purchase = session?.purchase;
+  const walletExpired = !!session?.purchase?.balanceExpiresAt && now >= Date.parse(session.purchase.balanceExpiresAt);
+  const purchase = walletExpired && session?.purchase ? { ...session.purchase,
+    assets: [], funding: null, balanceSource: "error" as const,
+    balanceError: "Wallet balances expired. Refresh your wallet to review current funds.",
+    swapApproval: null, walletControl: null, devnetSigning: null,
+    unsignedTransaction: "not_requested" as const, purchaseApproval: "required" as const,
+    paymentStatus: "PAYMENT_NOT_READY" as const } : session?.purchase;
   const selected = session?.exact.find(offer => offer.id === session.selectedOfferId);
   const expiresAt = purchase?.funding?.quoteExpiresAt ? Date.parse(purchase.funding.quoteExpiresAt) : 0;
   const expired = purchase?.funding?.quoteFreshness === "stale" || (!!expiresAt && now >= expiresAt);
@@ -312,7 +318,8 @@ export function ShopApp() {
                     : <button className="secondary" disabled={!!busy} onClick={() => void checkDevnetSigning()}>Prepare devnet signing check</button>}
           </details>}
           {purchase.walletKind === "sample" && <p className="sample-note">Illustrative balances, not your assets. No transaction is prepared for a sample wallet.</p>}
-          {purchase.balanceError && <p className="inline-error" role="alert">We couldn’t read this wallet. {purchase.balanceError}</p>}
+          {purchase.balanceError && <p className="inline-error" role="alert">{purchase.balanceError}</p>}
+          {purchase.walletAddress && <button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, walletMode, address, fundingMint)}>Refresh wallet balances</button>}
           {purchase.assets.length > 0 && <div className="assets">{purchase.assets.filter(asset => asset.isUsdc || asset.kind === "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? "Token"} value={asset.amountDisplay} />)}{purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <details className="review-details"><summary>Other tokens in this wallet</summary>{purchase.assets.filter(asset => !asset.isUsdc && asset.kind !== "native").map(asset => <Row key={asset.mint} label={asset.symbol ?? maskAddress(asset.mint)} value={asset.amountDisplay} />)}<p>Unrecognized tokens are shown by mint address. They have no assumed dollar value or guaranteed conversion route.</p></details>}</div>}
           {purchase.assets.some(asset => !asset.isUsdc && asset.kind !== "native") && <label className="asset-select">Use an asset for the difference<select disabled={!!busy} value={fundingMint ?? ""} onChange={event => void selectOffer(session!.selectedOfferId!, walletMode, address, event.target.value || null)}><option value="">Suggest SOL</option>{purchase.assets.filter(asset => !asset.isUsdc).map(asset => <option key={asset.mint} value={asset.mint}>{asset.symbol ?? asset.mint}</option>)}</select></label>}
         </Block>
