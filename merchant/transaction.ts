@@ -1,4 +1,5 @@
 import { requirePubkey } from "./base58";
+import { ASSOCIATED_TOKEN_PROGRAM } from "./ata";
 import { signBytes, type SolanaKey } from "./keys";
 import { TOKEN_PROGRAM } from "./product";
 
@@ -88,6 +89,78 @@ export function buildCreateTokenAccount(input: {
   });
 }
 
+export function buildCreateAssociatedTokenAccount(input: {
+  payer: string;
+  associated: string;
+  owner: string;
+  mint: string;
+  blockhash: string;
+}): BuiltTransaction {
+  return compile({
+    blockhash: input.blockhash,
+    accounts: [
+      { address: input.payer, signer: true, writable: true },
+      { address: input.associated, signer: false, writable: true },
+      { address: input.owner, signer: false, writable: false },
+      { address: input.mint, signer: false, writable: false },
+      { address: SYSTEM_PROGRAM, signer: false, writable: false },
+      { address: TOKEN_PROGRAM, signer: false, writable: false },
+      { address: ASSOCIATED_TOKEN_PROGRAM, signer: false, writable: false },
+    ],
+    instructions: [{
+      program: ASSOCIATED_TOKEN_PROGRAM,
+      accounts: [input.payer, input.associated, input.owner, input.mint, SYSTEM_PROGRAM, TOKEN_PROGRAM],
+      data: Uint8Array.of(1),
+    }],
+  });
+}
+
+export function buildRefundTransaction(input: {
+  feePayer: string;
+  merchant: string;
+  sourceTokenAccount: string;
+  destinationTokenAccount: string;
+  mint: string;
+  reference: string;
+  amount: bigint;
+  decimals: number;
+  memo: string;
+  blockhash: string;
+}): BuiltTransaction {
+  const data = new Uint8Array(10);
+  data[0] = 12;
+  writeU64(data, 1, input.amount);
+  data[9] = input.decimals;
+  return compile({
+    blockhash: input.blockhash,
+    accounts: [
+      { address: input.feePayer, signer: true, writable: true },
+      { address: input.merchant, signer: true, writable: false },
+      { address: input.sourceTokenAccount, signer: false, writable: true },
+      { address: input.destinationTokenAccount, signer: false, writable: true },
+      { address: input.mint, signer: false, writable: false },
+      { address: TOKEN_PROGRAM, signer: false, writable: false },
+      { address: MEMO_PROGRAM, signer: false, writable: false },
+      { address: input.reference, signer: false, writable: false },
+    ],
+    instructions: [
+      { program: TOKEN_PROGRAM, accounts: [input.sourceTokenAccount, input.mint, input.destinationTokenAccount, input.merchant], data },
+      { program: MEMO_PROGRAM, accounts: [input.merchant, input.reference], data: new TextEncoder().encode(input.memo) },
+    ],
+  });
+}
+
+export function signPreparedTransaction(serialized: string, key: SolanaKey): Uint8Array {
+  const raw = Buffer.from(serialized, "base64");
+  if (raw[0] !== 1) throw new Error("The checkout transaction does not have one signer.");
+  const message = raw.subarray(65);
+  const firstAccount = message.subarray(4, 36);
+  if (Buffer.compare(firstAccount, key.publicKey) !== 0) throw new Error("The checkout is not for this payer.");
+  const signed = raw.subarray();
+  signed.set(signBytes(key, message), 1);
+  return Uint8Array.from(signed);
+}
+
 export function signTransaction(built: BuiltTransaction, keys: SolanaKey[]): Uint8Array {
   if (keys.length !== built.signers.length || keys.some((key, index) => key.address !== built.signers[index])) {
     throw new Error("Transaction signers are not in the required order.");
@@ -122,7 +195,7 @@ function compile(input: { blockhash: string; accounts: AccountMeta[]; instructio
   });
   const message = Uint8Array.from([
     signers.length,
-    0,
+    ordered.filter((account) => account.signer && !account.writable).length,
     ordered.filter((account) => !account.signer && !account.writable).length,
     ...shortvec(ordered.length),
     ...ordered.flatMap((account) => [...requirePubkey(account.address, "account")]),

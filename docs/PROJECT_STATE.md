@@ -33,7 +33,11 @@ Acceptance for the local half:
 
 LOCAL. `npx vitest run tests/devnet-merchant.test.ts` passed 7 tests. The test product is `devnet-test-marker`: item 500000, shipping 200000, tax 300000, total 1000000 minor units. The mint in that test is Circle's published Solana devnet USDC mint. The chain responses are fixtures, not broadcast transactions.
 
+LOCAL. `tests/devnet-broadcast.test.ts` covers the unbroadcast runner. A `jsonParsed` transfer verifies only after `uiTokenAmount` is copied onto the balance. A payer with no SOL, and a payer with SOL but no USDC, never reach `send`. A mocked funded chain creates the missing merchant token account, confirms one order, and refunds it. Associated-token addresses for the payer and merchant wallets match `@solana/web3.js` 1.99 `findProgramAddressSync`. That package is not a dependency.
+
 DEVNET. `getAccountInfo` for `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` on `https://api.devnet.solana.com` returned owner `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, space 82, and decimals 6. Source for the address: https://developers.circle.com/stablecoins/usdc-contract-addresses.
+
+DEVNET. At slot 507286765 the payer still had 0 lamports and no USDC token account. The live runner returned `blocked` before `sendTransaction`. No devnet payment, order, or refund exists.
 
 ## Failed hypotheses
 
@@ -56,8 +60,10 @@ The on-chain half of milestone 1 needs devnet SOL and Circle devnet USDC. Genera
 - Payer: `3cZQhK76SC4ve12WjNcugVi7z1SgQgxY4dpbNtsoon6M`
 - Merchant wallet: `8rXZ9KFzc3NCMMvNdyfJ5irvHnTWYYGLqPJY5WuMuwmZ`
 
-Owner action: fund the payer from https://faucet.solana.com and https://faucet.circle.com with Solana devnet SOL and Solana devnet USDC. Do not send mainnet assets. That unlocks creating the token accounts, broadcasting the reviewed test payment, reading the merchant order from the confirmed transaction, and broadcasting the refund.
+The runner is `executeDevnetPurchase`. It reads the payer balance and both token accounts, and it returns before `sendTransaction` when SOL or Circle devnet USDC is missing.
+
+Owner action: fund the payer from https://faucet.solana.com and https://faucet.circle.com with Solana devnet SOL and Solana devnet USDC. Do not send mainnet assets. That unlocks the same runner: create the missing token account, broadcast the reviewed 1 USDC payment, read the merchant order from the confirmed transaction, and broadcast the matching refund.
 
 ## Next useful action
 
-When those balances exist, broadcast one devnet payment for the posted 1 USDC total and one matching refund. Until then, do not start another provider survey.
+When those balances exist, run the funded devnet purchase once. Until then, do not start another provider survey.

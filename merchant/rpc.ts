@@ -1,3 +1,5 @@
+import type { ChainRpc } from "./execute";
+
 export const DEVNET_RPC = "https://api.devnet.solana.com";
 
 export async function rpc<T>(method: string, params: unknown[], fetchImpl: typeof fetch = fetch): Promise<T> {
@@ -30,4 +32,28 @@ export async function sendSigned(transaction: Uint8Array): Promise<string> {
 
 export async function confirmedTransaction(signature: string): Promise<unknown | null> {
   return rpc<unknown | null>("getTransaction", [signature, { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+}
+
+export function devnetChainRpc(): ChainRpc {
+  return {
+    async getBalance(address) {
+      const result = await rpc<{ value: number }>("getBalance", [address, { commitment: "confirmed" }]);
+      return BigInt(result.value);
+    },
+    async tokenAccount(address) {
+      const result = await rpc<{ value: { data?: { parsed?: { info?: { tokenAmount?: { amount?: unknown } } } } } | null }>(
+        "getAccountInfo",
+        [address, { encoding: "jsonParsed", commitment: "confirmed" }],
+      );
+      const amount = result.value?.data?.parsed?.info?.tokenAmount?.amount;
+      return typeof amount === "string" ? { amount: BigInt(amount) } : null;
+    },
+    async rent(space) {
+      return BigInt(await rpc<number>("getMinimumBalanceForRentExemption", [space]));
+    },
+    blockhash: recentBlockhash,
+    send: sendSigned,
+    getTransaction: confirmedTransaction,
+    pause: () => new Promise((resolve) => setTimeout(resolve, 1_000)),
+  };
 }
