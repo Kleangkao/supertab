@@ -10,5 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # SuperTab
 
-Financial execution is disabled. The owner permits explicit wallet message signing for nonfinancial wallet-control checks and sandbox/devnet signing UX. Do not sign or broadcast production transactions, execute swaps, issue production cards, or pay merchants without further owner authorization. Quotes and balance reads are allowed. Secrets belong only in `.env.local`.
+Financial execution is disabled. The owner permits explicit wallet message signing for nonfinancial wallet-control checks and sandbox/devnet signing UX. Do not sign or broadcast production transactions, execute swaps, issue production cards, or pay a third-party merchant without further owner authorization. Quotes and balance reads are allowed. Secrets belong only in `.env.local` or `merchant/secrets/`.
+
+On October 4, 2026 the owner authorized one local exception: an owner-controlled Solana devnet merchant may build a checkout, verify a devnet test transfer, and verify a refund. That proof uses a generated devnet key, never an existing wallet's private key. It does not authorize mainnet funds or a purchase from another retailer.
 

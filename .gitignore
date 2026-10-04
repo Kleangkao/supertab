@@ -39,6 +39,7 @@ dflow key.txt
 
 # local session data
 /data
+/merchant/secrets/
 
 # vercel
 .vercel
