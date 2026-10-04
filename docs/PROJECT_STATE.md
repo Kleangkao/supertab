@@ -46,6 +46,8 @@ DEVNET. The generated payer held 5 SOL and 20 Circle devnet USDC. One run create
 
 At slot 507318056 the payer again held 20000000 USDC and the merchant token account held 0. This is the owner-controlled devnet merchant. It is not an order from another retailer.
 
+DEVNET. SuperTab then read that same payment through the merchant. No new transaction was sent. The merchant restored the checkout from reference `rEfeqQyovPmPeCR8ByUHkmaxDajMFXps4FtBF8e52XT` and refund reference `E8Ry1AdVcxfLgMFw3obnkxhtsutHLSZP9GXLK8xrVxME`. A read before validation returned no order. SuperTab submitted the existing payment signature, and the merchant returned order `d0f4cec6-8265-4058-bc86-23f4b2f1dfeb`: total 1000000, Circle devnet USDC, settlement late, and the same payment signature. Submitting that signature again returned the same order. After the merchant checked the existing refund signature, SuperTab's read returned status refunded with refund signature `62Nwju2eZ8kRThBK7qJtq2ZfzKjpko9aonyUVQ9gFkJtioeXH7mG2jyij58b6Gpj4zbjv2LmARXk3JSMAXy52EuC`. This order id differs from `6359fb8a-17c0-4243-813b-6c92ed9df309` because the first record stayed in memory. Both records are the same transfer.
+
 ## Failed hypotheses
 
 Reconsider only with new evidence. Do not repeat the same calls.
