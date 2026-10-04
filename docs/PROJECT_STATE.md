@@ -58,6 +58,7 @@ Reconsider only with new evidence. Do not repeat the same calls.
 | Crossmint can quote the documented Amazon ASIN with Solana USDC | HTTP 500 wrapping Amazon Business `getProductsByAsins` 403. No order id. | The same staging project can read that ASIN, and a real US shipping address is available. |
 | Helio can show a Solana Pay order for True Classic | No plugin on that checkout. Paylink read returned 401. | A participating merchant grants a Helio credential that can read `ShopifyPaymentGid`. |
 | Catalog client credentials own True Classic or can install an app | They are checkout-read credentials, not store admin. | The owner controls the store or the merchant installs the app. |
+| The live True Classic checkout credential can read an order or pay with Solana | `tools/list` includes `get_order` and `complete_checkout`. `get_order` for `gid://shopify/Order/0` returned `orders_not_allowed`: missing `read_global_api_orders`. The `complete_checkout` schema does not mention Solana. Its instrument funding sources are debit, credit, prepaid, and store, and the named handler is Apple Pay with type `card`. | The store's checkout schema gains a Solana handler, and a credential with `read_global_api_orders` can read an order this agent actually placed. |
 | Bitrefill buys the selected product | It sells a gift card or top-up and needs an account key. | The owner accepts that substitution and supplies a key. |
 | Coinbase Business Checkouts spend shopper Solana USDC | The documented checkout network is Base. | Coinbase documents Solana for that checkout and a third-party order. |
 | Public devnet airdrop and Circle's faucet can fund a transfer from this session | Airdrop returned JSON-RPC 429. The faucet returned `RECAPTCHA_ERROR`. The owner later funded the payer outside this session. | Do not repeat those calls. The funded purchase has already run. |
@@ -71,4 +72,4 @@ Milestone 1 is complete for the owner-controlled devnet merchant. Milestones 2 a
 
 ## Next useful action
 
-Choose a merchant that will accept the shopper's Solana USDC and expose an order SuperTab can read. Do not start another provider survey, and do not broadcast another devnet purchase.
+Choose a merchant whose checkout accepts the shopper's Solana USDC and whose order read is available to SuperTab. Adding `read_global_api_orders` to the current True Classic credential does not add a Solana payment handler. Do not call `complete_checkout`, start another provider survey, or broadcast another devnet payment.
