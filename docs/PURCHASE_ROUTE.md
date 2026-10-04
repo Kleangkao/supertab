@@ -4,7 +4,24 @@ No route yet connects one purchase across a selected product, a payable amount, 
 
 ## Decision
 
-Crossmint Headless Orders is not a usable Shopify purchase route. Do not call `POST /orders` again for a `shopify:` locator unless Crossmint documents that locator again or answers the support request below. Agent Checkouts is a different product and does not fund the purchase from the shopper's Solana wallet.
+Amazon through Crossmint Headless Orders is the documented physical-goods route, and it is blocked before a quote. On October 4, 2026 the staging key was sent one `POST /api/2022-06-09/orders` with locator `amazon:B01DFKC2SO`, `payment.method` `solana`, currency `usdc`, a documented placeholder email, and a disposable payer. No shipping address was invented. The response was HTTP 500. The message showed Crossmint calling `https://na.business-api.amazon.com/products/2020-08-26/products/getProductsByAsins` and Amazon returning 403. No order id, quote, or transaction was returned. The call was not repeated.
+
+That separates the requirements:
+
+| Requirement | Result |
+| --- | --- |
+| Staging authentication | Verified earlier the same day by `orders.read` HTTP 200. |
+| `orders.create` reaches Amazon | The 500 is Amazon's 403, not a Crossmint 401. |
+| Solana USDC quote | Not returned. The create-order schema still lists method `solana` and currency `usdc`. |
+| Physical-goods staging | The request reached Amazon product lookup and stopped there. |
+| Buyer eligibility | The schema says shipping country `US` only. The authorized buyer destination is Thailand, so a real quote would still be ineligible without a US address. None was invented. |
+| Merchant order evidence | Absent. A Crossmint order id, had one been returned, would still not be Amazon's own order id. |
+
+The narrative page `https://docs.crossmint.com/payments/headless/guides/providers/amazon` now renders Agent Checkouts, which is production-only and card-funded. The API reference still documents the Amazon locator. Agent Checkouts was not called.
+
+**Owner access decision.** Amazon purchasing stays blocked until Crossmint or Amazon Business enables product lookup for this staging project. The confirmation needed is that `getProductsByAsins` succeeds for the project, and that a staging quote can be funded with Solana USDC without a production order. A US shipping address is also required by the current schema. Shopify and Helio were not called again.
+
+Crossmint Headless Orders is not a usable Shopify purchase route. Do not call `POST /orders` again for a `shopify:` locator unless Crossmint documents that locator again or answers the support request below.
 
 ## Hypothesis tested
 
