@@ -1,14 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { encodeBase58, requirePubkey } from "../merchant/base58";
 import { ASSOCIATED_TOKEN_PROGRAM, associatedTokenAddress } from "../merchant/ata";
 import { isOnCurve } from "../merchant/curve";
 import { executeDevnetPurchase, type ChainRpc } from "../merchant/execute";
-import { generateSolanaKey, keyFromStored, type SolanaKey } from "../merchant/keys";
+import { generateSolanaKey, type SolanaKey } from "../merchant/keys";
 import { normalizeChainTransaction } from "../merchant/normalize";
 import { CIRCLE_SOLANA_DEVNET_USDC_MINT, TEST_TOTAL_MINOR } from "../merchant/product";
-import { devnetChainRpc } from "../merchant/rpc";
+import { confirmedTransaction } from "../merchant/rpc";
 import { verifyTransfer, type ChainTransaction } from "../merchant/verify";
 import { verifyEd25519 } from "../src/lib/wallet-proof";
 
@@ -104,21 +103,19 @@ describe("devnet broadcast preparation", () => {
     expect(accountKeys(chain.sent[1]!)[2]).toBe(destination);
     expect(accountKeys(chain.sent[2]!)[2]).toBe(destination);
     expect(accountKeys(chain.sent[2]!)[3]).toBe(source);
+    expect(memoAccountsAreSigners(chain.sent[1]!)).toBe(true);
+    expect(memoAccountsAreSigners(chain.sent[2]!)).toBe(true);
   });
 });
 
-it.skipIf(process.env.RUN_DEVNET_BROADCAST !== "1")("live devnet purchase stays blocked until the payer is funded", async () => {
-  const stored = JSON.parse(readFileSync("merchant/secrets/devnet-keys.json", "utf8")) as {
-    payer: { address: string; publicKey: string; seed: string };
-    merchant: { address: string; publicKey: string; seed: string };
-  };
-  const result = await executeDevnetPurchase({
-    payer: keyFromStored(stored.payer),
-    merchantWallet: keyFromStored(stored.merchant),
-    now: Date.now(),
-    rpc: devnetChainRpc(),
-  });
-  expect(result.status).toBe("blocked");
+it.skipIf(process.env.RUN_DEVNET_BROADCAST !== "1")("recorded devnet payment and refund remain confirmed", async () => {
+  const payment = normalizeChainTransaction(await confirmedTransaction("3kQNnZbAXi4CTuXkatAQoRG3ayp6mVjgpwRViAMEKTXDoabra5YnFyT7Wpbc3GCbxnktggiyT8MWY4N6htZivrM9"));
+  const refund = normalizeChainTransaction(await confirmedTransaction("62Nwju2eZ8kRThBK7qJtq2ZfzKjpko9aonyUVQ9gFkJtioeXH7mG2jyij58b6Gpj4zbjv2LmARXk3JSMAXy52EuC"));
+  expect(payment?.meta?.err).toBeNull();
+  expect(refund?.meta?.err).toBeNull();
+  expect(payment?.meta?.postTokenBalances?.map((balance) => balance.amount).sort()).toEqual(["1000000", "19000000"]);
+  expect(refund?.meta?.postTokenBalances?.map((balance) => balance.amount).sort()).toEqual(["0", "20000000"]);
+  expect(payment?.meta?.postTokenBalances?.every((balance) => balance.mint === CIRCLE_SOLANA_DEVNET_USDC_MINT && balance.decimals === 6)).toBe(true);
 });
 
 function parsedBalance(accountIndex: number, owner: string, amount: string) {
@@ -177,8 +174,46 @@ function mockRpc(payer: SolanaKey, merchant: SolanaKey, input: { lamports: bigin
 }
 
 function accountKeys(transaction: Uint8Array): string[] {
-  const signatures = transaction[0]!;
-  const message = transaction.subarray(1 + signatures * 64);
+  const message = messageBytes(transaction);
   const count = message[3]!;
   return Array.from({ length: count }, (_, index) => encodeBase58(message.subarray(4 + index * 32, 4 + (index + 1) * 32)));
+}
+
+function memoAccountsAreSigners(transaction: Uint8Array): boolean {
+  const message = messageBytes(transaction);
+  const signerCount = message[0]!;
+  const keys = accountKeys(transaction);
+  const memoIndex = keys.indexOf("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+  let offset = 4 + keys.length * 32 + 32;
+  const [instructionCount, afterCount] = readShortvec(message, offset);
+  offset = afterCount;
+  for (let index = 0; index < instructionCount; index += 1) {
+    const program = message[offset]!;
+    offset += 1;
+    const [accountCount, afterAccounts] = readShortvec(message, offset);
+    const accounts = [...message.subarray(afterAccounts, afterAccounts + accountCount)];
+    offset = afterAccounts + accountCount;
+    const [dataLength, afterData] = readShortvec(message, offset);
+    offset = afterData + dataLength;
+    if (program === memoIndex && accounts.some((account) => account >= signerCount)) return false;
+  }
+  return memoIndex >= 0;
+}
+
+function messageBytes(transaction: Uint8Array): Uint8Array {
+  return transaction.subarray(1 + transaction[0]! * 64);
+}
+
+function readShortvec(bytes: Uint8Array, offset: number): [number, number] {
+  let value = 0;
+  let shift = 0;
+  let cursor = offset;
+  while (cursor < bytes.length) {
+    const byte = bytes[cursor]!;
+    cursor += 1;
+    value |= (byte & 127) << shift;
+    if ((byte & 128) === 0) return [value, cursor];
+    shift += 7;
+  }
+  throw new Error("Compact length was truncated.");
 }

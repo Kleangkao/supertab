@@ -12,9 +12,9 @@ USDC is the first supported asset. SOL conversion comes after a purchase route w
 
 ## Current milestone
 
-Engineering proof: an owner-controlled devnet merchant demonstrates payment, order confirmation, failure recovery, and refund.
+Milestone 1 is complete. The owner-controlled devnet merchant demonstrated payment, order confirmation, failure recovery, and refund. Failure recovery and the late-payment rules were exercised with fixtures. The payment, order, and refund were also exercised once on devnet.
 
-This milestone does not prove that an existing retailer accepts Solana, and it does not prove a real purchase.
+This milestone does not prove that an existing retailer accepts Solana, and it does not prove a real purchase. Milestone 2 still needs a participating merchant.
 
 Acceptance for the local half:
 
@@ -37,7 +37,14 @@ LOCAL. `tests/devnet-broadcast.test.ts` covers the unbroadcast runner. A `jsonPa
 
 DEVNET. `getAccountInfo` for `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` on `https://api.devnet.solana.com` returned owner `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, space 82, and decimals 6. Source for the address: https://developers.circle.com/stablecoins/usdc-contract-addresses.
 
-DEVNET. At slot 507286765 the payer still had 0 lamports and no USDC token account. The live runner returned `blocked` before `sendTransaction`. No devnet payment, order, or refund exists.
+DEVNET. The generated payer held 5 SOL and 20 Circle devnet USDC. One run created the merchant token account, paid the posted 1.000000 USDC, and refunded that exact amount.
+
+- Token account: `2oFqoLXKfSmbxHEhizpp7TVTC8GeYfZEBX3ag47UczyfX7xYjyVcB23keAqgjXKb3L26tWxm9bPgFGydEsfKCBP7`, slot 507317703.
+- Payment: `3kQNnZbAXi4CTuXkatAQoRG3ayp6mVjgpwRViAMEKTXDoabra5YnFyT7Wpbc3GCbxnktggiyT8MWY4N6htZivrM9`, slot 507317970. Payer balance 20000000 to 19000000. Merchant balance 0 to 1000000. Mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, decimals 6. Memo `d12a29a5-1e41-4f03-a88e-98aeba76c7bf`.
+- The merchant validated that transfer and created order `6359fb8a-17c0-4243-813b-6c92ed9df309`.
+- Refund: `62Nwju2eZ8kRThBK7qJtq2ZfzKjpko9aonyUVQ9gFkJtioeXH7mG2jyij58b6Gpj4zbjv2LmARXk3JSMAXy52EuC`, slot 507317976. Merchant balance 1000000 to 0. Payer balance 19000000 to 20000000. The memo is the order id. The order was marked refunded only after that return matched.
+
+At slot 507318056 the payer again held 20000000 USDC and the merchant token account held 0. This is the owner-controlled devnet merchant. It is not an order from another retailer.
 
 ## Failed hypotheses
 
@@ -51,19 +58,15 @@ Reconsider only with new evidence. Do not repeat the same calls.
 | Catalog client credentials own True Classic or can install an app | They are checkout-read credentials, not store admin. | The owner controls the store or the merchant installs the app. |
 | Bitrefill buys the selected product | It sells a gift card or top-up and needs an account key. | The owner accepts that substitution and supplies a key. |
 | Coinbase Business Checkouts spend shopper Solana USDC | The documented checkout network is Base. | Coinbase documents Solana for that checkout and a third-party order. |
-| Public devnet airdrop and Circle's faucet can fund a transfer from this session | Airdrop returned JSON-RPC 429. The faucet returned `RECAPTCHA_ERROR`. | The payer address below holds devnet SOL and Circle devnet USDC. |
+| Public devnet airdrop and Circle's faucet can fund a transfer from this session | Airdrop returned JSON-RPC 429. The faucet returned `RECAPTCHA_ERROR`. The owner later funded the payer outside this session. | Do not repeat those calls. The funded purchase has already run. |
 
 ## Remaining blocker
 
-The on-chain half of milestone 1 needs devnet SOL and Circle devnet USDC. Generated keys are in gitignored `merchant/secrets/devnet-keys.json`.
+Milestone 1 is complete for the owner-controlled devnet merchant. Milestones 2 and 3 are not. A real purchase still needs a participating merchant or a legitimate intermediary. Catalog credentials, a wallet signature, and this devnet order do not supply that access.
 
 - Payer: `3cZQhK76SC4ve12WjNcugVi7z1SgQgxY4dpbNtsoon6M`
 - Merchant wallet: `8rXZ9KFzc3NCMMvNdyfJ5irvHnTWYYGLqPJY5WuMuwmZ`
 
-The runner is `executeDevnetPurchase`. It reads the payer balance and both token accounts, and it returns before `sendTransaction` when SOL or Circle devnet USDC is missing.
-
-Owner action: fund the payer from https://faucet.solana.com and https://faucet.circle.com with Solana devnet SOL and Solana devnet USDC. Do not send mainnet assets. That unlocks the same runner: create the missing token account, broadcast the reviewed 1 USDC payment, read the merchant order from the confirmed transaction, and broadcast the matching refund.
-
 ## Next useful action
 
-When those balances exist, run the funded devnet purchase once. Until then, do not start another provider survey.
+Choose a merchant that will accept the shopper's Solana USDC and expose an order SuperTab can read. Do not start another provider survey, and do not broadcast another devnet purchase.

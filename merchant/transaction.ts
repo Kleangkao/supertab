@@ -52,8 +52,8 @@ export function buildPaymentTransaction(input: {
       { address: input.reference, signer: false, writable: false },
     ],
     instructions: [
-      { program: TOKEN_PROGRAM, accounts: [input.sourceTokenAccount, input.mint, input.destinationTokenAccount, input.buyer], data },
-      { program: MEMO_PROGRAM, accounts: [input.buyer, input.reference], data: new TextEncoder().encode(input.memo) },
+      { program: TOKEN_PROGRAM, accounts: [input.sourceTokenAccount, input.mint, input.destinationTokenAccount, input.buyer, input.reference], data },
+      { program: MEMO_PROGRAM, accounts: [input.buyer], data: new TextEncoder().encode(input.memo) },
     ],
   });
 }
@@ -144,8 +144,8 @@ export function buildRefundTransaction(input: {
       { address: input.reference, signer: false, writable: false },
     ],
     instructions: [
-      { program: TOKEN_PROGRAM, accounts: [input.sourceTokenAccount, input.mint, input.destinationTokenAccount, input.merchant], data },
-      { program: MEMO_PROGRAM, accounts: [input.merchant, input.reference], data: new TextEncoder().encode(input.memo) },
+      { program: TOKEN_PROGRAM, accounts: [input.sourceTokenAccount, input.mint, input.destinationTokenAccount, input.merchant, input.reference], data },
+      { program: MEMO_PROGRAM, accounts: [input.merchant], data: new TextEncoder().encode(input.memo) },
     ],
   });
 }

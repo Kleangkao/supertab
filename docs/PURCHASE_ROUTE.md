@@ -169,8 +169,8 @@ Merchant participation is required. No existing store we can access can supply i
 
 Updated October 4, 2026. The local owner-controlled merchant is implemented and covered by `tests/devnet-merchant.test.ts` (7 tests). It sells one labeled devnet marker for 1.000000 Circle devnet USDC: item 0.500000, shipping 0.200000, and tax 0.300000. SuperTab can request the checkout and read the order. It does not write the order.
 
-A devnet `getAccountInfo` for `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` returned the token program as owner, 82 bytes, and decimals 6. That matches Circle's published Solana devnet USDC mint. `requestAirdrop` returned HTTP-level JSON-RPC 429, and Circle's public faucet returned `RECAPTCHA_ERROR`. At slot 507286765 the generated payer still had 0 lamports and no USDC account. The broadcast runner returned `blocked` and did not call `sendTransaction`. The on-chain payment, order, and refund are not yet DEVNET evidence. See `docs/PROJECT_STATE.md`.
+A devnet `getAccountInfo` for `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` returned the token program as owner, 82 bytes, and decimals 6. The owner then funded the generated payer. One devnet run paid 1.000000 Circle devnet USDC and refunded it. Payment `3kQNnZbAXi4CTuXkatAQoRG3ayp6mVjgpwRViAMEKTXDoabra5YnFyT7Wpbc3GCbxnktggiyT8MWY4N6htZivrM9` at slot 507317970 moved 1000000 minor units to the merchant. The merchant created order `6359fb8a-17c0-4243-813b-6c92ed9df309`. Refund `62Nwju2eZ8kRThBK7qJtq2ZfzKjpko9aonyUVQ9gFkJtioeXH7mG2jyij58b6Gpj4zbjv2LmARXk3JSMAXy52EuC` at slot 507317976 returned the same amount, and the order was marked refunded. This proves the owner-controlled merchant only. See `docs/PROJECT_STATE.md`.
 
 ## Not implemented
 
-No Crossmint, Bitrefill, Coinbase, or VoltVault client was added. No devnet transfer has been broadcast, so there is no on-chain merchant order yet. The runner that would broadcast is in place and stops while the payer is empty.
+No Crossmint, Bitrefill, Coinbase, or VoltVault client was added. No retailer order exists. Another devnet purchase is not the next step.
