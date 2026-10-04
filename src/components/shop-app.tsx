@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
 import { CheckoutReview } from "@/components/checkout-review";
-import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet } from "@/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet, type StandardWalletAccount } from "@/lib/wallet-standard";
 import type { WalletChallenge } from "@/lib/wallet-proof";
 import type { DevnetSigningCheck } from "@/lib/devnet-memo";
 import { clearWalletReview } from "@/lib/wallet-review";
@@ -31,11 +31,14 @@ export function ShopApp() {
   const [canSignMessage, setCanSignMessage] = useState(false);
   const [devnetCheck, setDevnetCheck] = useState<DevnetSigningCheck | null>(null);
   const [canSignDevnet, setCanSignDevnet] = useState(false);
+  const [walletSigned, setWalletSigned] = useState(false);
   const [now, setNow] = useState(0);
   const lock = useRef(false);
   const walletEpoch = useRef(0);
   const walletOff = useRef<(() => void) | null>(null);
   const activeWallet = useRef<StandardWallet | null>(null);
+  const activeAccount = useRef<StandardWalletAccount | null>(null);
+  const walletDesk = useRef<{ sessionId: string; termsId: string; address: string } | null>(null);
   const latestSession = useRef<SessionView | null>(null);
   const pendingWalletReset = useRef<{ sessionId: string; offerId: string; quantity: number } | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
@@ -108,7 +111,7 @@ export function ShopApp() {
 
   function invalidateWallet() {
     walletOff.current?.(); walletOff.current = null;
-    activeWallet.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false);
+    activeWallet.current = null; activeAccount.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false);
     walletEpoch.current++;
     setWalletMode("none"); setAddress(""); setFundingMint(null);
     const current = latestSession.current;
@@ -133,7 +136,7 @@ export function ShopApp() {
     if (!session) return;
     setWalletChallenge(null);
     setDevnetCheck(null);
-    if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; setCanSignMessage(false); setCanSignDevnet(false); }
+    if (mode !== "connected") { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; setCanSignMessage(false); setCanSignDevnet(false); }
     const canSign = signatureAvailable ?? (mode === "connected" && !!activeWallet.current?.features["solana:signTransaction"]);
     const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, quantity: quantity ?? (session.selectedOfferId === offerId ? session.purchase?.checkout.quantity ?? 1 : 1), walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable: canSign }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
     if (body) {
@@ -147,19 +150,29 @@ export function ShopApp() {
     const wallets = discoverStandardWallets(window);
     if (!chosen && wallets.length > 1) { setWalletChoices([...wallets]); return; }
     const wallet = chosen ?? wallets[0];
-    if (!wallet) { setError("No Solana wallet extension was found. Use the real demo wallet in read-only mode instead."); return; }
+    if (!wallet) { setError("No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect and sign the control message. That signature approves no purchase and moves no funds."); return; }
     setWalletChoices([]);
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
-      activeWallet.current = wallet; setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
-      setDevnetCheck(null); setCanSignDevnet(supportsDevnetSigning(wallet, connected.address));
+      activeWallet.current = wallet; activeAccount.current = connected.account; setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
+      setDevnetCheck(null); setCanSignDevnet(supportsDevnetSigning(wallet, connected.address, connected.account));
       walletOff.current?.();
       const epoch = walletEpoch.current;
       walletOff.current = watchStandardWallet(wallet, invalidateWallet);
       lock.current = false;
       if (epoch !== walletEpoch.current) return;
       if (session?.selectedOfferId) await selectOffer(session.selectedOfferId, "connected", connected.address, null, connected.canRequestSignature);
+      else {
+        const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "start", address: connected.address }), signal: AbortSignal.timeout(12_000) });
+        const started = await response.json() as { sessionId: string; termsId: string; challenge: WalletChallenge; error?: string };
+        if (!response.ok) throw new Error(started.error ?? "Could not prepare the wallet check.");
+        walletDesk.current = { sessionId: started.sessionId, termsId: started.termsId, address: connected.address };
+        setAddress(connected.address);
+        setWalletMode("connected");
+        setWalletChallenge(started.challenge);
+      }
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
     finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
@@ -167,11 +180,14 @@ export function ShopApp() {
   async function checkWalletControl(sign = false) {
     const current = latestSession.current;
     const wallet = activeWallet.current;
-    if (lock.current || !current?.purchase?.walletAddress || !wallet) return;
+    const desk = walletDesk.current;
+    if (lock.current || !wallet || !(current?.purchase?.walletAddress || desk)) return;
     const epoch = walletEpoch.current;
     lock.current = true; setError(null); setBusy(sign ? "Waiting for your wallet’s message signature…" : "Preparing a wallet control check…");
     try {
-      const terms = { sessionId: current.sessionId, termsId: current.purchase.termsId };
+      const terms = current?.purchase
+        ? { sessionId: current.sessionId, termsId: current.purchase.termsId }
+        : { sessionId: desk!.sessionId, termsId: desk!.termsId };
       if (!sign) {
         const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ ...terms, action: "challenge" }), signal: AbortSignal.timeout(12_000) });
@@ -181,16 +197,19 @@ export function ShopApp() {
         return;
       }
       const challenge = walletChallenge;
-      if (!challenge || challenge.address !== current.purchase.walletAddress || challenge.termsId !== terms.termsId
+      const expectedAddress = current?.purchase?.walletAddress ?? desk?.address;
+      if (!challenge || challenge.address !== expectedAddress || challenge.termsId !== terms.termsId
         || currentTime() >= Date.parse(challenge.expiresAt)) throw new Error("Request a fresh wallet check before signing.");
-      const signature = await signWalletMessage(wallet, challenge.address, challenge.message);
+      const signature = await signWalletMessage(wallet, challenge.address, challenge.message, activeAccount.current ?? undefined);
       if (epoch !== walletEpoch.current) return;
       const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...terms, action: "verify", challengeId: challenge.id, signature }), signal: AbortSignal.timeout(12_000) });
       const body = await response.json() as SessionView & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "The signature could not be verified.");
       if (epoch !== walletEpoch.current) return;
-      latestSession.current = body; setSession(body); setNow(currentTime()); setWalletChallenge(null);
+      if (current?.purchase) { latestSession.current = body; setSession(body); }
+      else setWalletSigned(true);
+      setNow(currentTime()); setWalletChallenge(null);
     } catch (caught) {
       if (epoch === walletEpoch.current) { setWalletChallenge(null); setError(caught instanceof Error ? caught.message : "Your wallet check was canceled."); }
     } finally { lock.current = false; setBusy(null); flushWalletReset(); }
@@ -215,7 +234,7 @@ export function ShopApp() {
       const check = devnetCheck;
       if (!check || check.address !== current.purchase.walletAddress || check.termsId !== terms.termsId
         || currentTime() >= Date.parse(check.expiresAt)) throw new Error("Prepare a current devnet signing check first.");
-      const signedTransaction = await signDevnetCheck(wallet, check);
+      const signedTransaction = await signDevnetCheck(wallet, check, activeAccount.current ?? undefined);
       if (epoch !== walletEpoch.current) return;
       const response = await fetch("/api/wallet/devnet", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...terms, action: "verify", checkId: check.id, signedTransaction }), signal: AbortSignal.timeout(12_000) });
@@ -241,7 +260,8 @@ export function ShopApp() {
   const live = purchase?.funding?.quoteFreshness === "live" && !expired;
   const prepared = purchase?.unsignedTransaction === "prepared" && live;
   const checkoutExpired = !!purchase?.checkoutVerification.expiresAt && now >= Date.parse(purchase.checkoutVerification.expiresAt);
-  const checkoutVerified = purchase?.finalTotal === "verified" && !checkoutExpired;
+  const checkoutVerified = purchase?.checkoutVerification.status === "verified" && !checkoutExpired;
+  const checkoutCalculated = purchase?.checkoutVerification.status === "calculated" && !checkoutExpired;
 
   useEffect(() => {
     if (!checkoutExpired || busy || !session?.sessionId) return;
@@ -268,6 +288,9 @@ export function ShopApp() {
           {!session && <p className="hero-copy">Tell us what you’re looking for. SuperTab finds real products and helps you plan how to fund them with your Solana assets.</p>}
         </header>
         <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
+        {!session && <div className="wallet-control"><p className="section-copy">Connect a wallet and sign a control message before you shop. This approves no purchase and moves no funds.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
+          {walletChallenge && !walletSigned && <><pre className="wallet-message">{walletChallenge.message}</pre><button className="secondary" disabled={!!busy} onClick={() => void checkWalletControl(true)}>Sign wallet control message</button></>}
+        </div>}
         {!session && <div className="suggestions"><span>Try a little inspiration</span>{["Find me a black polo under $50.", "Find me running shoes under $120."].map(prompt => <button key={prompt} disabled={!!busy} onClick={() => setDraft(prompt)}>{prompt.replace("Find me ", "").replace(".", "")} <span aria-hidden="true">↗</span></button>)}</div>}
         {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}<span className="loading-hint">Live providers can take a moment.</span></div>}
         {error && <div className="notice warning" role="alert">{error}<button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div>}
@@ -283,13 +306,14 @@ export function ShopApp() {
       {purchase && <aside className="purchase-review" ref={reviewRef} aria-label="Purchase review" aria-busy={!!busy}>
         <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Let’s make a plan.</h2><span className="badge">Purchase review</span></div>
         <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
-        <div className="price-summary"><span>{checkoutVerified ? "Final merchant checkout total" : `Item ${purchase.checkout.itemKind === "catalog" ? "catalog" : purchase.checkout.itemKind === "merchant_checkout" ? "merchant" : "listing"} price`}</span><strong>{checkoutVerified ? purchase.checkout.merchantTotalDisplay : purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · {checkoutVerified ? "current merchant terms" : "final total pending"}</p></div>
+        <div className="price-summary"><span>{checkoutVerified ? "Final merchant checkout total" : checkoutCalculated ? "Merchant-calculated total · can still change" : `Item ${purchase.checkout.itemKind === "catalog" ? "catalog" : purchase.checkout.itemKind === "merchant_checkout" ? "merchant" : "listing"} price`}</span><strong>{checkoutVerified || checkoutCalculated ? purchase.checkout.merchantTotalDisplay : purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · {checkoutVerified ? "current merchant terms" : checkoutCalculated ? "not approvable until the merchant marks checkout ready" : "final total pending"}</p></div>
         <label className="asset-select">Quantity<select aria-label="Product quantity" disabled={!!busy} value={purchase.checkout.quantity}
           onChange={event => void selectOffer(session!.selectedOfferId!, walletMode, address, fundingMint, purchase.signatureCapability === "available", Number(event.target.value))}>
           {Array.from({ length: 20 }, (_, index) => <option key={index} value={index + 1}>{index + 1}</option>)}
         </select></label>
         <CheckoutReview key={`${session!.selectedOfferId}:${purchase.checkout.quantity}`} purchase={purchase} now={now} busy={!!busy} merchantUrl={selected?.merchantReviewUrl ?? null}
           onVerify={checkoutId => request("/api/purchase/checkout", { sessionId: session!.sessionId, termsId: purchase.termsId, checkoutId }, "Verifying the merchant’s current checkout…")}
+          onCalculate={destination => request("/api/purchase/checkout", { sessionId: session!.sessionId, termsId: purchase.termsId, destination }, "Asking the merchant to calculate shipping, tax and discounts…")}
           onApprove={() => request("/api/purchase/intent", { sessionId: session!.sessionId, termsId: purchase.termsId }, "Recording approval of these purchase terms…")} />
         <details className="review-details"><summary>Price breakdown</summary><Row label="Items" value={purchase.checkout.itemDisplay ?? "Unknown"} /><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Other fees" value={purchase.checkout.feeDisplay ?? "None reported"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
         <Block step="1" title="Your spending assets"><p className="section-copy">Read your wallet to see how this purchase could be funded.</p>
@@ -334,7 +358,7 @@ export function ShopApp() {
           </> : <p>Funding is temporarily unavailable. Your selected product is preserved.</p>}
         </Block>
         <Block step="3" title="You approve the next step"><div className={`approval-state ${prepared ? "ready" : ""}`}><span className="badge">{prepared ? "Transaction prepared" : expired ? "Refresh required" : "Swap not executed"}</span><h3>{prepared ? "Ready for your approval" : purchase.walletKind === "sample" ? "This is a sample preview" : live && !purchase.funding?.fundable ? "More funding needed." : live ? "Quote ready. Transaction not prepared." : "Your money stays in your wallet."}</h3><p>{prepared ? "A real unsigned transaction has been prepared and its format checked. It would convert the asset amount above into USDC, subject to the quote’s minimum received and slippage." : live && !purchase.funding?.fundable ? "This asset cannot cover the full funding gap while preserving the network reserve." : live ? "A live quote is available. Use a real wallet and refresh to try preparing an unsigned transaction." : "No swap has been signed or broadcast."}</p>{prepared && <strong className="approval-label">AWAITING USER APPROVAL</strong>}<p className="section-copy">Production transaction signing and financial execution are disabled. The separate devnet signing check does not approve or execute a swap.</p></div></Block>
-        <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ wallet-backed CardRail → merchant</div><span className="badge">Card rail not connected</span><p>Preferred integration: Bridge + Stripe Issuing. Sandbox access is blocked; no card has been issued. Merchant order creation is not implemented.</p><div className="end-states"><span>Payment not executed</span><span>Order not created</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
+        <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ ordinary merchant payment</div><span className="badge">Card rail not connected</span><p>No card is issuing or paying. Bridge sandbox access stays blocked. Immersve’s published sandbox keys returned API_KEY_DISABLED, so no sandbox authorization was run. Solana funding stays separate. A sandbox payment would not create a merchant order.</p><div className="end-states"><span>Payment not executed</span><span>Order not created</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
         <p className="section-copy">Purchase approval becomes available after the final merchant total is verified. A live conversion quote does not mean USDC is ready or a payment has been approved.</p>
         {selected?.currency === "USD" && selected.priceMinor && BigInt(selected.priceMinor) > 0n && <PaymentRehearsal key={`${selected.id}:${selected.priceMinor}:${purchase.checkout.quantity}`} itemMinor={selected.priceMinor} quantity={purchase.checkout.quantity} title={selected.title} />}
       </aside>}

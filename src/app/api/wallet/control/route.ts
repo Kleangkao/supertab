@@ -10,11 +10,22 @@ export async function POST(request: Request) {
     const origin = sameOriginRequest(request);
     if (!origin) return Response.json({ error: "Use the wallet check from SuperTab." }, { status: 403, headers });
     const body = await request.json() as Record<string, unknown>;
-    if (typeof body.sessionId !== "string" || typeof body.termsId !== "string") throw new Error("Review a product first.");
     const service = getShoppingService();
-    if (body.action === "challenge") return Response.json(service.requestWalletCheck(body.sessionId, body.termsId, origin), { headers });
+    if (body.action === "start" && typeof body.address === "string") {
+      const started = service.beginWalletControl(body.address, origin);
+      console.info("wallet-control start");
+      return Response.json(started, { headers });
+    }
+    if (typeof body.sessionId !== "string" || typeof body.termsId !== "string") throw new Error("Review a product first.");
+    if (body.action === "challenge") {
+      const challenge = service.requestWalletCheck(body.sessionId, body.termsId, origin);
+      console.info("wallet-control challenge");
+      return Response.json(challenge, { headers });
+    }
     if (body.action !== "verify" || typeof body.challengeId !== "string" || typeof body.signature !== "string") throw new Error("Invalid wallet check.");
-    return Response.json(service.confirmWalletCheck(body.sessionId, body.termsId, body.challengeId, body.signature), { headers });
+    const confirmed = service.confirmWalletCheck(body.sessionId, body.termsId, body.challengeId, body.signature);
+    console.info("wallet-control verify");
+    return Response.json(confirmed, { headers });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "The wallet check failed." }, { status: 400, headers });
   }

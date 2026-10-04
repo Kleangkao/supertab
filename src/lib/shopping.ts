@@ -26,9 +26,10 @@ import {
   toCheckoutView,
   toFundingView,
   toOfferView,
+  toStatementView,
 } from "./serialize";
 import type { ProviderNote, PurchaseView, SessionView } from "./view";
-import { checkoutAccess, readMerchantCheckout, type CheckoutEvidence } from "./merchant-checkout";
+import { checkoutAccess, prepareMerchantCheckout, readMerchantCheckout, type CheckoutEvidence } from "./merchant-checkout";
 import { createWalletChallenge, verifyWalletChallenge, type WalletChallenge } from "./wallet-proof";
 import { prepareDevnetCheck, verifyDevnetCheck } from "./devnet-signing";
 import type { DevnetSigningCheck } from "./devnet-memo";
@@ -249,6 +250,18 @@ export class ShoppingService {
     return this.view(this.requireSession(sessionId));
   }
 
+  /** A signature with no selected product. It does not approve a purchase. */
+  beginWalletControl(address: string, origin: string): { sessionId: string; termsId: string; challenge: WalletChallenge } {
+    const session = emptySession(crypto.randomUUID());
+    session.walletMode = "connected";
+    session.walletAddress = address;
+    session.signatureCapability = "available";
+    session.assistantMessage = "This wallet check is separate from any product or payment.";
+    session.walletChallenge = createWalletChallenge({ sessionId: session.id, termsId: session.termsId, origin, address, nowMs: this.nowMs() });
+    this.sessions.set(session.id, session);
+    return { sessionId: session.id, termsId: session.termsId, challenge: session.walletChallenge };
+  }
+
   requestWalletCheck(sessionId: string, termsId: string, origin: string): WalletChallenge {
     const session = this.requireSession(sessionId);
     if (session.walletMode !== "connected" || !session.walletAddress || session.termsId !== termsId) {
@@ -320,6 +333,24 @@ export class ShoppingService {
       config: this.deps.config, fetchImpl: this.deps.fetchImpl, nowMs: this.nowMs() });
     if (this.sessions.get(sessionId) !== session) return this.view(this.requireSession(sessionId));
     if (evidence.expiresAtMs <= this.nowMs()) throw new Error("This checkout expired while it was being read. Verify a current checkout.");
+    session.checkoutEvidence = evidence;
+    return this.review({ sessionId, offerId: offer.id, quantity: session.quantity, walletMode: session.walletMode,
+      address: session.walletAddress ?? undefined, fundingMint: current.plan?.candidateMint,
+      signatureAvailable: session.signatureCapability === "available" });
+  }
+
+  async calculateMerchantTotal(sessionId: string, termsId: string, destination: unknown, buyerIp?: string | null): Promise<SessionView> {
+    const current = this.requireSession(sessionId);
+    const offer = this.selectedOffer(current);
+    if (!offer || current.termsId !== termsId) throw new PurchaseApprovalError("Your selection changed. Review the current product before asking the merchant to price it.");
+    const session: SessionRecord = { ...current, checkoutEvidence: null, snapshot: payableFromOffer(offer, current.quantity),
+      purchaseIntent: null, swapApproval: null, quote: null, plan: null,
+      unsignedTransaction: "not_requested", transactionVersion: null, termsId: crypto.randomUUID(), state: "CHECKOUT_READY" };
+    this.sessions.set(sessionId, session);
+    const evidence = await prepareMerchantCheckout({ offer, quantity: session.quantity, destination, buyerIp,
+      config: this.deps.config, fetchImpl: this.deps.fetchImpl, nowMs: this.nowMs() });
+    if (this.sessions.get(sessionId) !== session) return this.view(this.requireSession(sessionId));
+    if (evidence.expiresAtMs <= this.nowMs()) throw new Error("This checkout expired while it was being priced. Submit the destination again.");
     session.checkoutEvidence = evidence;
     return this.review({ sessionId, offerId: offer.id, quantity: session.quantity, walletMode: session.walletMode,
       address: session.walletAddress ?? undefined, fundingMint: current.plan?.candidateMint,
@@ -593,10 +624,12 @@ export class ShoppingService {
       purchase: session.snapshot && session.selectedOfferId ? {
         termsId: session.termsId,
         checkoutVerification: {
-          status: session.checkoutEvidence ? "verified" : "unknown",
+          status: session.checkoutEvidence?.authority === "merchant_ready" ? "verified"
+            : session.checkoutEvidence?.authority === "merchant_calculated" ? "calculated"
+            : session.checkoutEvidence?.authority === "merchant_stated" ? "stated" : "unknown",
           readAvailable: offer ? checkoutAccess(offer, this.deps.config).available : false,
-          message: session.checkoutEvidence ? "Final total verified from the merchant. Payment and order are still separate steps."
-            : offer ? checkoutAccess(offer, this.deps.config).message : "Choose a product first.",
+          message: session.checkoutEvidence?.snapshot.note
+            ?? (offer ? checkoutAccess(offer, this.deps.config).message : "Choose a product first."),
           merchantOrigin: session.checkoutEvidence?.merchantOrigin ?? null,
           verifiedAt: session.checkoutEvidence ? new Date(session.checkoutEvidence.verifiedAtMs).toISOString() : null,
           expiresAt: session.checkoutEvidence ? new Date(session.checkoutEvidence.expiresAtMs).toISOString() : null,
@@ -644,8 +677,10 @@ export class ShoppingService {
         }),
         orderStatus: "ORDER_NOT_CREATED" satisfies OrderState,
         unsignedTransaction: session.unsignedTransaction,
-        amountKind: session.checkoutEvidence ? "merchant_checkout_total" : "planning_amount",
-        finalTotal: session.checkoutEvidence ? "verified" : "unknown",
+        amountKind: session.checkoutEvidence?.authority === "merchant_ready" ? "merchant_checkout_total"
+          : session.checkoutEvidence?.authority === "merchant_calculated" ? "merchant_calculated_total" : "planning_amount",
+        finalTotal: session.checkoutEvidence?.authority === "merchant_ready" ? "verified" : "unknown",
+        merchantStatement: session.checkoutEvidence?.statement ? toStatementView(session.checkoutEvidence.statement) : null,
         financialExecution: "disabled",
       } : null,
     };

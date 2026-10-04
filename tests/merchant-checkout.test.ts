@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readConfig } from "../src/lib/config";
-import { CHECKOUT_FRESHNESS_MS, readMerchantCheckout, verifyCheckout } from "../src/lib/merchant-checkout";
+import { CHECKOUT_FRESHNESS_MS, classifyCreatedCheckout, merchantDestination, prepareMerchantCheckout, readMerchantCheckout, verifyCheckout } from "../src/lib/merchant-checkout";
 import { normalizeShopifyProducts } from "../src/lib/shopify";
 import { ShoppingService } from "../src/lib/shopping";
 import { USDC_MINT } from "../src/lib/tokens";
@@ -60,7 +60,8 @@ describe("authenticated merchant checkout evidence", () => {
     expect(evidence.snapshot).toMatchObject({ itemMinor: 1200n, merchantTotalMinor: 1750n,
       discountMinor: 100n, shippingMinor: 500n, taxMinor: 100n, feeMinor: 50n, merchantTotalKnown: true });
     expect(evidence.expiresAtMs).toBe(NOW + CHECKOUT_FRESHNESS_MS);
-    expect(Object.keys(evidence)).toEqual(["merchantOrigin", "verifiedAtMs", "expiresAtMs", "snapshot"]);
+    expect(Object.keys(evidence)).toEqual(["merchantOrigin", "verifiedAtMs", "expiresAtMs", "authority", "statement", "snapshot"]);
+    expect(evidence.authority).toBe("merchant_ready");
     expect(Object.keys(evidence.snapshot)).not.toContain("buyer");
     expect(Object.keys(evidence.snapshot)).not.toContain("payment");
   });
@@ -132,6 +133,109 @@ describe("authenticated merchant checkout evidence", () => {
       await expect(readMerchantCheckout({ ...context, buyerIp, config, fetchImpl: async () => { calls++; return Response.json({}); } })).rejects.toThrow(/buyer network context/);
     }
     expect(calls).toBe(0);
+  });
+});
+
+const destination = { email: "buyer@example.com", firstName: "Ada", lastName: "Lovelace", streetAddress: "1 Market", city: "Bangkok", region: "Bangkok", postalCode: "10110", country: "th", discountCode: "WELCOME10" };
+
+describe("merchant-calculated checkout before payment", () => {
+  it("rejects invented or incomplete destinations before any merchant call", async () => {
+    let calls = 0;
+    await expect(prepareMerchantCheckout({ ...context, destination: { ...destination, email: "not-an-email" }, config, fetchImpl: async () => { calls++; return Response.json({}); } })).rejects.toThrow(/email/);
+    expect(() => merchantDestination({ ...destination, country: "Thailand" })).toThrow(/country/);
+    expect(calls).toBe(0);
+  });
+
+  it("creates a checkout, never completes it, and keeps buyer data out of the evidence", async () => {
+    const calls: string[] = [];
+    const priced = { ...checkout(), status: "incomplete", id: "gid://shopify/Checkout/priced?key=SECRET_CAPABILITY" };
+    const evidence = await prepareMerchantCheckout({ ...context, destination, config, fetchImpl: async (url, init) => {
+      calls.push(String(url));
+      const request = JSON.parse(String(init?.body));
+      expect(request.params.name).toBe("create_checkout");
+      expect(JSON.stringify(request)).not.toContain("complete_checkout");
+      expect(request.params.arguments.checkout.discounts.codes).toEqual(["WELCOME10"]);
+      expect(request.params.arguments.checkout.fulfillment.methods[0].destinations[0].address_country).toBe("TH");
+      expect(request.params.arguments.checkout.payment).toBeUndefined();
+      return Response.json({ result: { structuredContent: priced } });
+    } });
+    expect(calls).toEqual(["https://merchant.test/api/ucp/mcp"]);
+    expect(evidence.authority).toBe("merchant_calculated");
+    expect(evidence.snapshot.merchantTotalKnown).toBe(false);
+    expect(evidence.snapshot.merchantTotalMinor).toBe(1750n);
+    expect(evidence.snapshot.payableAuthority).toBe("merchant_calculated");
+    const serialized = JSON.stringify(evidence, (_key, value) => typeof value === "bigint" ? value.toString() : value);
+    for (const secret of ["buyer@example.com", "1 Market", "SECRET_CAPABILITY", "WELCOME10", "TEST_ONLY_TOKEN"]) expect(serialized).not.toContain(secret);
+  });
+
+  it("does not treat a subtotal-only checkout as a payable amount", () => {
+    const bare = checkout();
+    bare.totals = [{ type: "subtotal", amount: 1200 }, { type: "total", amount: 1200 }];
+    bare.line_items[0]!.totals = [{ type: "subtotal", amount: 1200 }, { type: "total", amount: 1200 }];
+    bare.line_items[0]!.item.price = 1200;
+    let caught = "";
+    try { classifyCreatedCheckout({ ...bare, status: "incomplete", messages: [{ code: "delivery_address_required", content: "buyer@example.com" }] }, context); }
+    catch (error) { caught = error instanceof Error ? error.message : ""; }
+    expect(caught).toMatch(/Merchant reported: delivery_address_required/);
+    expect(caught).not.toContain("buyer@example.com");
+  });
+
+  it("keeps a provisional discount unapprovable even when the merchant says ready", () => {
+    const ready = { ...checkout(), discounts: { applied: [{ title: "Student", amount: 100, provisional: true }] } };
+    expect(() => verifyCheckout(ready, context)).toThrow(/provisional/);
+    expect(classifyCreatedCheckout(ready, context).authority).toBe("merchant_calculated");
+  });
+
+  it("keeps an unreconciled non-USD merchant statement out of the USD funding amount", () => {
+    const stated = { ...checkout(), status: "requires_escalation", currency: "THB",
+      line_items: [{ item: { id: offer!.sourceItemId, price: 175000 }, quantity: 1, totals: [{ type: "subtotal", amount: 175000 }, { type: "total", amount: 175000 }] }],
+      totals: [{ type: "subtotal", amount: 175000 }, { type: "fulfillment", amount: 50653 }, { type: "tax", amount: 22282 }, { type: "duty", amount: 70431 }, { type: "total", amount: 327484 }],
+      fulfillment: { methods: [{ type: "shipping", groups: [{ id: "group", selected_option_id: "air", options: [{ id: "air", title: "Express Courier (Air)" }] }] }] },
+      messages: [{ code: "buyer_identity_contact_method_required", type: "error" }, { code: "delivery_first_name_required", type: "error" }, { code: "delivery_last_name_required", type: "error" }],
+    };
+    const evidence = classifyCreatedCheckout(stated, context);
+    expect(evidence.authority).toBe("merchant_stated");
+    expect(evidence.snapshot.merchantTotalKnown).toBe(false);
+    expect(evidence.snapshot.currency).toBe("USD");
+    expect(evidence.statement).toMatchObject({ currency: "THB", subtotalMinor: 175000n, shippingMinor: 50653n, taxMinor: 22282n, dutyMinor: 70431n, statedTotalMinor: 327484n, gapMinor: 9118n, reconciled: false, deliveryMethod: "Express Courier (Air)" });
+    expect(evidence.statement?.missingCodes).toEqual(["buyer_identity_contact_method_required", "delivery_first_name_required", "delivery_last_name_required"]);
+  });
+
+  it("still refuses funding after contact details when the duty line does not reconcile", () => {
+    const stated = { ...checkout(), status: "requires_escalation", currency: "THB",
+      line_items: [{ item: { id: offer!.sourceItemId, price: 175000 }, quantity: 1, totals: [{ type: "subtotal", amount: 175000 }, { type: "total", amount: 175000 }] }],
+      totals: [{ type: "subtotal", amount: 175000 }, { type: "fulfillment", amount: 50653 }, { type: "tax", amount: 22282 }, { type: "duty", amount: 70431 }, { type: "total", amount: 327484 }],
+      fulfillment: { methods: [{ type: "shipping", groups: [{ id: "group", selected_option_id: "air", options: [{ id: "air", title: "Express Courier (Air)" }] }] }] },
+      messages: [{ code: "extension_interaction_required", type: "error" }],
+    };
+    const evidence = classifyCreatedCheckout(stated, context);
+    expect(evidence.authority).toBe("merchant_stated");
+    expect(evidence.snapshot.merchantTotalKnown).toBe(false);
+    expect(evidence.snapshot.currency).toBe("USD");
+    expect(evidence.statement).toMatchObject({ gapMinor: 9118n, reconciled: false });
+    expect(evidence.statement?.missingCodes).toEqual(["extension_interaction_required"]);
+    expect(evidence.snapshot.note).toMatch(/not using it as a funding amount/);
+  });
+
+  it("plans with the merchant total but still refuses purchase approval", async () => {
+    const searchConfig = config;
+    const service = new ShoppingService({ config: searchConfig, now: () => new Date(NOW), fetchImpl: async (url, init) => {
+      if (String(url).includes("merchant.test")) {
+        const request = JSON.parse(String(init?.body));
+        expect(request.params.name).toBe("create_checkout");
+        return Response.json({ result: { structuredContent: { ...checkout(), status: "requires_escalation", id: "gid://shopify/Checkout/priced?key=SECRET_CAPABILITY" } } });
+      }
+      return Response.json({ result: { structuredContent: { products: [product] } } });
+    } });
+    const search = await service.converse(null, "Find me a black polo under $50");
+    const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "none" });
+    const priced = await service.calculateMerchantTotal(search.sessionId, review.purchase!.termsId, destination, BUYER_IP);
+    expect(priced.purchase).toMatchObject({ finalTotal: "unknown", amountKind: "merchant_calculated_total",
+      checkoutVerification: { status: "calculated" }, checkout: { merchantTotalDisplay: "$17.50", shippingDisplay: "$5.00", taxDisplay: "$1.00" },
+      funding: { planningDisplay: "$17.50", planningBasis: "merchant_calculated_total", merchantTotalKnown: false } });
+    await expect(service.approvePurchase(search.sessionId, priced.purchase!.termsId)).rejects.toThrow(/final merchant checkout total/);
+    const serialized = JSON.stringify(priced);
+    for (const secret of ["buyer@example.com", "1 Market", "SECRET_CAPABILITY", "WELCOME10"]) expect(serialized).not.toContain(secret);
   });
 });
 

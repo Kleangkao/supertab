@@ -54,6 +54,8 @@ export interface PayableSnapshot {
   discountMinor: bigint | null;
   merchantTotalMinor: bigint | null;
   merchantTotalKnown: boolean;
+  /** Absent on older snapshots. Merchant-calculated totals are not approvable until ready. */
+  payableAuthority?: "catalog_or_listing" | "merchant_stated" | "merchant_calculated" | "merchant_ready";
   currency: string | null;
   note: string;
 }
@@ -101,6 +103,7 @@ export function payableFromOffer(offer: NormalizedOffer, quantity: number): Paya
     discountMinor: null,
     merchantTotalMinor: null,
     merchantTotalKnown,
+    payableAuthority: "catalog_or_listing",
     currency: price?.currency ?? null,
     note: merchantTotalNote(price?.basis ?? null, shippingKnown),
   };
@@ -115,8 +118,14 @@ function merchantTotalNote(basis: PriceBasis | null, shippingKnown: boolean): st
   return `Item price and a shipping figure are known. Tax was not provided, so the merchant checkout total is still unknown.`;
 }
 
+export function payableAuthorityOf(snapshot: PayableSnapshot): NonNullable<PayableSnapshot["payableAuthority"]> {
+  if (snapshot.payableAuthority) return snapshot.payableAuthority;
+  return snapshot.merchantTotalKnown ? "merchant_ready" : "catalog_or_listing";
+}
+
 export function planningMinor(snapshot: PayableSnapshot): bigint | null {
-  if (snapshot.merchantTotalKnown && snapshot.merchantTotalMinor != null) return snapshot.merchantTotalMinor;
+  const authority = payableAuthorityOf(snapshot);
+  if (snapshot.merchantTotalMinor != null && (authority === "merchant_calculated" || authority === "merchant_ready")) return snapshot.merchantTotalMinor;
   if (snapshot.lineMinor == null) return null;
   if (snapshot.currency !== "USD") return null;
   const shipping = snapshot.shippingMinor ?? 0n;

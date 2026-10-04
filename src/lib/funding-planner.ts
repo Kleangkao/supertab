@@ -1,5 +1,5 @@
 import { formatMinor, formatUsdFromMinor, usdMinorToUsdcBase } from "./money";
-import type { PayableSnapshot } from "./offers";
+import { payableAuthorityOf, type PayableSnapshot } from "./offers";
 import {
   DEFAULT_SOL_RESERVE_LAMPORTS,
   USDC_DECIMALS,
@@ -33,7 +33,7 @@ export interface BoundQuote {
 
 export interface FundingPlan {
   payableKnown: boolean;
-  planningBasis: "catalog_price" | "listing_price" | "merchant_checkout_total" | "unknown";
+  planningBasis: "catalog_price" | "listing_price" | "merchant_calculated_total" | "merchant_checkout_total" | "unknown";
   merchantTotalKnown: boolean;
   planningMinor: bigint | null;
   planningCurrency: string | null;
@@ -85,13 +85,16 @@ export function planFunding(input: {
   if (usdc && usdc.decimals !== USDC_DECIMALS) {
     notes.push("The USDC account uses unexpected decimals, so it was not counted as spendable.");
   }
-  const basis = input.snapshot.merchantTotalKnown
+  const authority = payableAuthorityOf(input.snapshot);
+  const basis = authority === "merchant_ready"
     ? "merchant_checkout_total"
-    : input.snapshot.itemBasis === "catalog"
-      ? "catalog_price"
-      : input.snapshot.itemBasis === "listing"
-        ? "listing_price"
-        : "unknown";
+    : authority === "merchant_calculated"
+      ? "merchant_calculated_total"
+      : input.snapshot.itemBasis === "catalog"
+        ? "catalog_price"
+        : input.snapshot.itemBasis === "listing"
+          ? "listing_price"
+          : "unknown";
 
   if (!input.snapshot.merchantTotalKnown) {
     notes.push(input.snapshot.note);
@@ -186,7 +189,8 @@ export function planFunding(input: {
 }
 
 export function knownPlanningMinor(snapshot: PayableSnapshot): bigint | null {
-  if (snapshot.merchantTotalKnown && snapshot.merchantTotalMinor != null) return snapshot.merchantTotalMinor;
+  const authority = payableAuthorityOf(snapshot);
+  if (snapshot.merchantTotalMinor != null && (authority === "merchant_calculated" || authority === "merchant_ready")) return snapshot.merchantTotalMinor;
   if (snapshot.lineMinor == null || snapshot.currency !== "USD") return null;
   return snapshot.lineMinor + (snapshot.shippingMinor ?? 0n) - (snapshot.discountMinor ?? 0n);
 }

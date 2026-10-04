@@ -73,6 +73,21 @@ async function connectedSession() {
   return { owner, service, selection, view, advance: () => { nowMs += WALLET_PROOF_TTL_MS; } };
 }
 
+describe("wallet control before a product is selected", () => {
+  it("verifies a signature without creating a purchase, payment, or order", () => {
+    const owner = signer();
+    const service = new ShoppingService({ config: readConfig({}), now: () => new Date(NOW) });
+    const started = service.beginWalletControl(owner.address, "http://localhost:3000");
+    expect(started.challenge.message).toContain("does not approve a purchase");
+    const signature = owner.signature(started.challenge.message);
+    const confirmed = service.confirmWalletCheck(started.sessionId, started.termsId, started.challenge.id, signature);
+    expect(confirmed.purchase).toBeNull();
+    expect(confirmed.selectedOfferId).toBeNull();
+    expect(JSON.stringify(confirmed)).not.toContain(signature);
+    expect(() => service.confirmWalletCheck(started.sessionId, started.termsId, started.challenge.id, signature)).toThrow(/current/);
+  });
+});
+
 describe("wallet control service boundary", () => {
   it("records proof only after verification, consumes challenges, and never approves payment or swap", async () => {
     const { service, selection, view, owner, advance } = await connectedSession();

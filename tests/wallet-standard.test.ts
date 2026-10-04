@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { connectStandardWallet, discoverStandardWallets, watchStandardWallet, type StandardWallet } from "../src/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, signWalletMessage, supportsDevnetSigning, watchStandardWallet, type StandardWallet } from "../src/lib/wallet-standard";
 
 const wallet: StandardWallet = { name: "Late Solana wallet", accounts: [], features: {} };
 
@@ -48,6 +48,28 @@ it("deduplicates wallet registration and supports unregister", () => {
   expect(found).toHaveLength(1);
   unregister!();
   expect(found).toHaveLength(0);
+});
+
+it("signs with the account returned by connect when the wallet account list stays empty", async () => {
+  const account = { address: "connected-account", chains: ["solana:devnet"], features: ["solana:signMessage", "solana:signTransaction"] };
+  let signedWith = "";
+  const wallet: StandardWallet = {
+    name: "Connect-only wallet", accounts: [], chains: ["solana:devnet"],
+    features: {
+      "standard:connect": { connect: async () => ({ accounts: [account] }) },
+      "solana:signMessage": { signMessage: async (input: { account: { address: string }; message: Uint8Array }) => {
+        signedWith = input.account.address;
+        return [{ signedMessage: input.message, signature: new Uint8Array(64), signatureType: "ed25519" }];
+      } },
+      "solana:signTransaction": { signTransaction: async () => [], supportedTransactionVersions: ["legacy"] },
+    },
+  };
+  const connected = await connectStandardWallet(wallet);
+  expect(connected.account).toBe(account);
+  expect(supportsDevnetSigning(wallet, account.address)).toBe(false);
+  expect(supportsDevnetSigning(wallet, account.address, connected.account)).toBe(true);
+  expect(await signWalletMessage(wallet, account.address, "control", connected.account)).toHaveLength(88);
+  expect(signedWith).toBe("connected-account");
 });
 
 it("does not use a stale account when connect returns no authorized accounts", async () => {
