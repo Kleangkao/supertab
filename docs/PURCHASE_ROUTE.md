@@ -121,7 +121,7 @@ Checked October 4, 2026. No new provider account, Helio call, Shopify install, o
 
 True Classic is reachable for catalog search and checkout pricing. The configured Shopify values are Catalog client credentials from the Dev Dashboard. Shopify's Checkout MCP documents those credentials as a client-credentials token for catalog and checkout tools. The published token example scope is `read_global_api_catalog_search`. Order reads are a separate scope, `read_global_api_orders`, and only for orders placed through that agent. Shopify's credential guide says client credentials exchange a token directly only for an app acting on stores in its own organization. They do not make SuperTab the owner of True Classic, do not grant that store's Admin API, and do not permit installing a payment app.
 
-True Classic's previously inspected checkout did not offer Solana Pay. No other merchant we can access returns a purchase-specific Solana USDC request and then an order id from the merchant's own system. VoltVault shows a shared deposit address. Bitrefill returns a redemption code. Coinbase Business Checkouts settle on Base. Those findings stay closed.
+True Classic's previously inspected checkout did not offer Solana Pay. Its public discovery document `https://www.trueclassictees.com/.well-known/ucp` lists only Google Pay cards, Shopify card, and Shop Pay. No other merchant we can access returns a purchase-specific Solana USDC request and then an order id from the merchant's own system. VoltVault shows a shared deposit address. Bitrefill returns a redemption code. Coinbase Business Checkouts settle on Base. Those findings stay closed.
 
 ### Recommended setup
 
