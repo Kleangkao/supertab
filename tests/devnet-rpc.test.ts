@@ -1,6 +1,25 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { DEVNET_GENESIS_HASH, DEVNET_RPC, MAINNET_GENESIS_HASH, resetDevnetEndpointCheck, rpc, recentBlockhash, sendSigned } from "../merchant/rpc";
 import { requestDevnetCheckout } from "../src/lib/devnet-merchant-client";
+import { buildPaymentTransaction } from "../merchant/transaction";
+import { generateSolanaKey } from "../merchant/keys";
+import { CIRCLE_SOLANA_DEVNET_USDC_MINT } from "../merchant/product";
+
+it("refuses an expired blockhash before broadcast", async () => {
+  resetDevnetEndpointCheck();
+  const key = () => generateSolanaKey().address;
+  const transaction = buildPaymentTransaction({ buyer: key(), sourceTokenAccount: key(), destinationTokenAccount: key(),
+    mint: CIRCLE_SOLANA_DEVNET_USDC_MINT, reference: key(), amount: 1_000_000n, decimals: 6,
+    memo: "checkout", blockhash: key() }).transaction;
+  const methods: string[] = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    const method = JSON.parse(String(init?.body)).method as string;
+    methods.push(method);
+    return Response.json({ result: method === "getGenesisHash" ? DEVNET_GENESIS_HASH : { value: false } });
+  };
+  await expect(sendSigned(transaction, fetcher)).rejects.toThrow(/blockhash expired/);
+  expect(methods).toEqual(["getGenesisHash", "isBlockhashValid"]);
+});
 
 const RPC_ENV = ["SOLANA_RPC_URL", "SOLANA_DEVNET_RPC_URL"] as const;
 const SAVED_RPC_ENV = Object.fromEntries(RPC_ENV.map((key) => [key, process.env[key]]));

@@ -1,4 +1,5 @@
 import type { ChainRpc } from "./execute";
+import { transactionBlockhash } from "../src/lib/payment-message";
 
 /** Public devnet endpoint. Shopping's SOLANA_RPC_URL is mainnet and is never read here. */
 export const DEVNET_RPC = "https://api.devnet.solana.com";
@@ -81,6 +82,8 @@ export async function recentBlockhash(fetchImpl: typeof fetch = fetch): Promise<
 
 export async function sendSigned(transaction: Uint8Array, fetchImpl: typeof fetch = fetch): Promise<string> {
   await ensureDevnetEndpoint(fetchImpl);
+  const validity = await rpc<{ value: boolean }>("isBlockhashValid", [transactionBlockhash(transaction), { commitment: "confirmed" }], fetchImpl);
+  if (validity.value !== true) throw new Error("Payment blockhash expired or is unavailable. Cancel the review, request a fresh checkout, and sign again. No payment was sent.");
   return rpc<string>("sendTransaction", [Buffer.from(transaction).toString("base64"), { encoding: "base64", preflightCommitment: "confirmed" }], fetchImpl);
 }
 

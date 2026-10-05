@@ -14,5 +14,6 @@ export const TEST_PRODUCT = {
 } as const;
 
 export const TEST_TOTAL_MINOR = TEST_PRODUCT.itemMinor + TEST_PRODUCT.shippingMinor + TEST_PRODUCT.taxMinor;
-export const CHECKOUT_TTL_MS = 10 * 60_000;
+// A checkout carries a recent blockhash, not a ten-minute durable nonce.
+export const CHECKOUT_TTL_MS = 60_000;
 export const LATE_PAYMENT_WINDOW_MS = 24 * 60 * 60_000;

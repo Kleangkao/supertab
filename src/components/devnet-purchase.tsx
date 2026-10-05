@@ -143,6 +143,7 @@ export function DevnetPurchase() {
 
   async function send() {
     if (!checkout || !signedTransaction) return;
+    if (block) { setSignedTransaction(null); setError(block); return; }
     const signature = signedPaymentSignature(signedTransaction);
     if (!signature) { setError("The signed payment has no signature."); return; }
     setBusy("Sending the signed payment on devnet…");
@@ -156,7 +157,11 @@ export function DevnetPurchase() {
       if (sent.signature !== signature) throw new Error("Devnet returned a different signature. It was not submitted to the merchant.");
       await submit(signature);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Devnet rejected the signed payment.");
+      const message = caught instanceof Error ? caught.message : "Devnet rejected the signed payment.";
+      if (/blockhash.*(not found|expired|unavailable)/i.test(message)) {
+        clearReview();
+        setError("This payment's blockhash is no longer usable. Review a fresh checkout, approve and sign again, then send promptly.");
+      } else setError(message);
     } finally { setBusy(null); }
   }
 
@@ -301,6 +306,7 @@ export function DevnetPurchase() {
         <p>Payment reference {checkout.reference}</p>
         <p>Mint {checkout.mint}</p>
         <p>Expires {checkout.expiresAt}</p>
+        <p>Network fees are paid separately in devnet SOL. Approval allows wallet priority fees up to 0.0001 devnet SOL, plus the network base fee. The USDC total stays unchanged.</p>
         <button className="secondary" disabled={!!busy || approvedId === checkout.id} onClick={() => setApprovedId(checkout.id)}>
           {approvedId === checkout.id ? "Purchase approved" : `Approve this purchase · ${usdc(checkout.totalMinor)}`}
         </button>
@@ -309,7 +315,7 @@ export function DevnetPurchase() {
         {block && <p>{block}</p>}
         {signedTransaction && <>
           <p>The wallet signed this payment. It is still on this device.</p>
-          <button className="primary" disabled={!!busy} onClick={() => void send()}>Send signed payment on devnet</button>
+          <button className="primary" disabled={!!busy || !!block} onClick={() => void send()}>Send signed payment on devnet</button>
           <button className="secondary" disabled={!!busy || !signedPaymentSignature(signedTransaction)} onClick={() => void submit(signedPaymentSignature(signedTransaction) ?? "")}>Ask the merchant about this signature</button>
         </>}
         <button className="secondary" disabled={!!busy} onClick={() => void recover()}>Ask the merchant to recover an order</button>

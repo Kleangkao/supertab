@@ -1,4 +1,9 @@
-import { decodeBase58 } from "./base58";
+import { decodeBase58, encodeBase58 } from "./base58";
+
+export function transactionBlockhash(transaction: Uint8Array): string {
+  const hex = parse(transaction).blockhash;
+  return encodeBase58(Uint8Array.from(hex.match(/../g)!, pair => parseInt(pair, 16)));
+}
 
 /** Compare payment meaning across legacy/v0 serialization and account reordering.
  * No added instruction, changed privilege, blockhash, or lookup table is allowed.
@@ -6,6 +11,38 @@ import { decodeBase58 } from "./base58";
 export function samePaymentMessage(expected: Uint8Array, returned: Uint8Array): boolean {
   try {
     return JSON.stringify(comparable(parse(expected))) === JSON.stringify(comparable(parse(returned)));
+  } catch { return false; }
+}
+
+export const DEVNET_PRIORITY_FEE_CAP_LAMPORTS = 100_000n;
+
+/** Allow only the wallet's bounded unit-limit/unit-price pair in addition to the exact payment. */
+export function samePaymentWithWalletBudget(expected: Uint8Array, returned: Uint8Array): boolean {
+  try {
+    const left = parse(expected);
+    const right = parse(returned);
+    const budgetKey = pubkeyHex("ComputeBudget111111111111111111111111111111");
+    if (left.instructions.some(i => i.program.key === budgetKey)) return false;
+    const budgets = right.instructions.filter(i => i.program.key === budgetKey);
+    if (budgets.length !== 2) return false;
+    let units: bigint | null = null;
+    let price: bigint | null = null;
+    for (const instruction of budgets) {
+      if (instruction.accounts.length || instruction.program.signer || instruction.program.writable) return false;
+      const data = instruction.data;
+      const value = (hex: string) => BigInt(`0x${hex.match(/../g)!.reverse().join("")}`);
+      if (data.startsWith("02") && data.length === 10 && units === null) units = value(data.slice(2));
+      else if (data.startsWith("03") && data.length === 18 && price === null) price = value(data.slice(2));
+      else return false;
+    }
+    if (units === null || price === null || units <= 0n || units > 1_400_000n) return false;
+    const priorityFee = (units * price + 999_999n) / 1_000_000n;
+    if (priorityFee > DEVNET_PRIORITY_FEE_CAP_LAMPORTS) return false;
+    const payment = { ...right,
+      keys: right.keys.filter(key => key.key !== budgetKey),
+      instructions: right.instructions.filter(i => i.program.key !== budgetKey),
+    };
+    return JSON.stringify(comparable(left)) === JSON.stringify(comparable(payment));
   } catch { return false; }
 }
 

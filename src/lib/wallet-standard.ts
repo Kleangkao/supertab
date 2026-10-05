@@ -1,5 +1,5 @@
 import { checkMemoBytes, DEVNET_CHAIN, type DevnetSigningCheck } from "./devnet-memo";
-import { describePaymentMismatch, samePaymentMessage } from "./payment-message";
+import { describePaymentMismatch, samePaymentMessage, samePaymentWithWalletBudget } from "./payment-message";
 
 export interface StandardWalletAccount {
   address: string;
@@ -111,7 +111,7 @@ export async function signDevnetTransfer(wallet: StandardWallet, address: string
   const signed = Uint8Array.from(returned);
   const exact = signed.length === transaction.length && signed[0] === signers
     && signed.subarray(messageAt).every((byte, index) => byte === transaction[messageAt + index]);
-  if (!exact && !samePaymentMessage(transaction, signed)) {
+  if (!exact && !samePaymentMessage(transaction, signed) && !samePaymentWithWalletBudget(transaction, signed)) {
     throw new Error(`The wallet changed the payment message (${describePaymentMismatch(transaction, signed)}). No payment was sent. Extra instructions or changed payment terms are not accepted.`);
   }
   if (signed.subarray(1, 65).every((byte) => byte === 0)) {
