@@ -1,22 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { reviewStillBound } from "@/lib/digital-purchase";
 import type { PreparedDigitalPurchase } from "@/lib/digital-purchase-service";
+import {
+  CLAIM_REVIEW,
+  createPreparedAttempt,
+  parseStoredAttempt,
+  persistConnectedAttempt,
+  readAttemptServerSnapshot,
+  readAttemptSnapshot,
+  readStoredAttempt,
+  rememberPreparedQuote,
+  resumeAttempt,
+  subscribeAttempts,
+} from "@/lib/purchase-recovery";
 
 export function DigitalPurchase({
   address = "",
   network = "",
+  walletSource = "not_selected",
   onUseReadOnly,
 }: {
   address?: string;
   network?: "solana:mainnet" | "solana:devnet" | "";
+  walletSource?: "connected" | "read_only" | "not_selected";
   onUseReadOnly?: () => void;
 }) {
   const [review, setReview] = useState<PreparedDigitalPurchase | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recoveryNote, setRecoveryNote] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const storedRaw = useSyncExternalStore(subscribeAttempts, readAttemptSnapshot, readAttemptServerSnapshot);
+  const storedAttempt = parseStoredAttempt(storedRaw);
+  const resumed = walletSource === "connected" && network === "solana:mainnet" && address
+    ? resumeAttempt(storedAttempt, address)
+    : { current: null, foreign: false };
   const mainnet = network === "solana:mainnet" && !!address;
   const bound = !!review && reviewStillBound({
     reviewAddress: review.wallet.address,
@@ -31,7 +51,8 @@ export function DigitalPurchase({
     return () => window.clearInterval(timer);
   }, [review]);
 
-  const visible = bound ? review : null;
+  const visible = bound && review?.wallet.source === walletSource ? review : null;
+  const unresolved = resumed.current != null && resumed.current.state !== "prepared_not_submitted" && resumed.current.state !== "bitcoin_anchoring_verified";
   const merchantExpired = !!visible && now >= Date.parse(visible.terms.expiresAt);
   const conversionExpired = !!visible?.conversion.expiresAt && now >= Date.parse(visible.conversion.expiresAt);
   const expired = merchantExpired || conversionExpired;
@@ -44,12 +65,36 @@ export function DigitalPurchase({
       const response = await fetch("/api/digital-purchase/quote", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ walletAddress: address }),
+        body: JSON.stringify({
+          walletAddress: address,
+          walletSource: walletSource === "connected" ? "connected" : "read_only",
+        }),
       });
       const body = await response.json() as PreparedDigitalPurchase & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "The quote could not be prepared.");
       if (body.wallet.address !== address || body.wallet.network !== network) {
         throw new Error("The quote was not for the wallet now selected.");
+      }
+      if (body.wallet.source !== walletSource) {
+        throw new Error("The quote was not bound to this wallet connection.");
+      }
+      setRecoveryNote(null);
+      if (walletSource === "connected" && body.recovery.idempotencyKey && body.wallet.address) {
+        const prepared = createPreparedAttempt({
+          id: body.recovery.idempotencyKey,
+          walletSource: "connected",
+          walletAddress: body.wallet.address,
+          digest: body.payload.digest,
+          idempotencyKey: body.recovery.idempotencyKey,
+          amountAtomic: body.terms.amountAtomic,
+          payTo: body.terms.payTo,
+          feePayer: body.terms.feePayer,
+          merchantExpiresAt: body.terms.expiresAt,
+          nowIso: new Date().toISOString(),
+        });
+        const remembered = rememberPreparedQuote(readStoredAttempt(window.localStorage), prepared);
+        persistConnectedAttempt(remembered.attempt, window.localStorage);
+        if (remembered.reason) setRecoveryNote(remembered.reason);
       }
       setReview(body);
       setNow(Date.now());
@@ -71,10 +116,20 @@ export function DigitalPurchase({
         {busy ? "Refreshing the unpaid quote…" : "Refresh unpaid quote"}
       </button>
     </div>
-    <p>{mainnet ? "Refreshing a quote does not approve a purchase, request a signature, or move funds." : network === "solana:devnet" ? "The connected wallet is not on Solana mainnet, so this review is cleared." : "Choose the read-only demo wallet or connect a wallet before requesting a quote. This panel does not ask for a signature."}</p>
+    <p>{walletSource === "connected" && mainnet
+      ? `Connected wallet ${address} on Solana mainnet. Balances, conversion, purchase terms, and recovery identity use this address. This is not an approval to pay.`
+      : walletSource === "read_only"
+        ? "Read-only exploration. This address cannot produce an approval package, and it is not stored as a recoverable payment."
+        : network === "solana:devnet"
+          ? "The connected wallet is not on Solana mainnet, so this review is cleared."
+          : "Choose the read-only demo wallet or connect a wallet before requesting a quote. This panel does not ask for a signature."}{mainnet ? " Refreshing a quote does not approve a purchase, request a signature, or move funds." : ""}</p>
     {error && <div className="notice warning" role="alert">{error}</div>}
+    {recoveryNote && <div className="notice warning" role="status">{recoveryNote}</div>}
+    {resumed.foreign && <p>A stored attempt belongs to a different wallet and is not continued.</p>}
+    {walletSource === "read_only" && storedAttempt?.walletAddress === address && <p>This browser has a stored attempt for this address. Exploration mode does not continue it and does not pay.</p>}
     {visible && <article className="path-card">
       <div className="detail-row"><span>Wallet</span><strong>{visible.wallet.address}</strong></div>
+      <div className="detail-row"><span>Wallet source</span><strong>{visible.wallet.source === "connected" ? "Connected" : "Read-only exploration"}</strong></div>
       <div className="detail-row"><span>Network</span><strong>{visible.wallet.network === "solana:mainnet" ? "Solana mainnet" : "Not mainnet"}</strong></div>
       <div className="detail-row"><span>Product</span><strong>{visible.terms.productName}, quantity {visible.terms.quantity}</strong></div>
       <div className="detail-row"><span>Delivery</span><strong>{visible.delivery.method}</strong></div>
@@ -97,7 +152,7 @@ export function DigitalPurchase({
       <div className="detail-row"><span>SOL cap</span><strong>{visible.spend.solDisplay ?? "Not bounded"}</strong></div>
       <div className="detail-row"><span>Previous comparison</span><strong>0.008585479 SOL, not authorization</strong></div>
       <div className="detail-row"><span>SOL reserve</span><strong>0.010000000 SOL kept back</strong></div>
-      <div className="detail-row"><span>Spending review</span><strong>{visible.readyForApproval && !expired ? "Quote checked, still unsigned" : "Not ready"}</strong></div>
+      <div className="detail-row"><span>Spending review</span><strong>{visible.wallet.source === "connected" && visible.readyForApproval && !expired && !unresolved ? "Spending review only. Not an approval to pay." : "Not an approval package"}</strong></div>
       <div className="detail-row"><span>Execution</span><strong>Unavailable</strong></div>
       <p>{visible.spend.unusedUsdc}</p>
       <p>{visible.payload.retained} {visible.payload.returned}</p>
@@ -107,5 +162,19 @@ export function DigitalPurchase({
       <p>Quote validation is not simulation, signing, execution, or delivery. Stages: {visible.stages.quote}, {visible.stages.simulation}, {visible.stages.signing}, {visible.stages.execution}, {visible.stages.delivery}.</p>
       {visible.blockers.length > 0 && <ul>{visible.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
     </article>}
+    {resumed.current && <article className="path-card">
+      <div className="detail-row"><span>Stored attempt</span><strong>{resumed.current.state}</strong></div>
+      <div className="detail-row"><span>Recovery wallet</span><strong>{resumed.current.walletAddress}</strong></div>
+      <div className="detail-row"><span>Recovery network</span><strong>Solana mainnet</strong></div>
+      <div className="detail-row"><span>Payment authorization</span><strong>Not stored</strong></div>
+      <p>A lost response stays on this attempt. It does not start another swap or payment.</p>
+    </article>}
+    <article className="path-card">
+      <h3>Wallet claim, not requested</h3>
+      <p>{CLAIM_REVIEW.purpose}</p>
+      <p>{CLAIM_REVIEW.distinguishes}</p>
+      <p>{CLAIM_REVIEW.message}</p>
+      <button className="secondary" type="button" disabled>Claim signature unavailable</button>
+    </article>
   </section>;
 }

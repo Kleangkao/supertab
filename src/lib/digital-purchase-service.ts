@@ -59,7 +59,7 @@ export interface PreparedDigitalPurchase {
     thailand: "No country restriction is named. This test does not prove shipping to Thailand.";
     orderRead: "A later certificate proves this purchase only when its signed bytes contain bitcoin_anchor, this digest, 1 USDC, the mainnet USDC mint, Solana mainnet, this wallet, and the settlement transaction. Another valid certificate does not.";
     refund: "The store says a failed instant delivery takes no money. A settled payment with no certificate is a defect handled by hand. Nothing here refunds automatically, and this review does not send a letter.";
-    recovery: "A verify URL needs a certificate id. If the purchase response is lost before that id is kept, this build cannot recover it without the original payment or a wallet signature. Neither will be requested.";
+    recovery: "A caller-supplied Idempotency-Key is documented for 24 hours with the same item, payer, and original payment. This review stores the key and does not store a payment. Listing a lost purchase needs a disabled wallet-message claim.";
   };
   accounts: {
     buyerUsdc: "present" | "missing" | "not_read";
@@ -67,6 +67,7 @@ export interface PreparedDigitalPurchase {
   };
   wallet: {
     status: "read" | "not_read";
+    source: "connected" | "read_only" | "not_selected";
     address: string | null;
     network: "solana:mainnet" | null;
     usdcAtomic: string | null;
@@ -111,6 +112,7 @@ export interface PreparedDigitalPurchase {
 
 export async function prepareBitcoinAnchorPurchase(input: {
   walletAddress?: string;
+  walletSource?: "connected" | "read_only";
 }, deps: {
   config: AppConfig;
   fetchImpl?: typeof fetch;
@@ -150,6 +152,7 @@ export async function prepareBitcoinAnchorPurchase(input: {
   if (terms.feePayer !== REVIEWED_FEE_PAYER) blockers.push("The payment sponsor changed from the reviewed fee payer.");
   if (!merchantUsdc) blockers.push("The merchant USDC account is missing, so this payment cannot be bounded without an account-creation cost.");
 
+  const walletSource: "connected" | "read_only" = input.walletSource === "connected" ? "connected" : "read_only";
   const walletAddress = input.walletAddress?.trim() ?? "";
   if (!walletAddress) {
     return finish(terms, nowMs, blockers.concat("No wallet was read."), {
@@ -171,6 +174,7 @@ export async function prepareBitcoinAnchorPurchase(input: {
   if (!buyerUsdc) blockers.push("This wallet has no mainnet USDC account. Creating one is an extra SOL cost, so the purchase is not bounded.");
   const wallet = {
     status: "read" as const,
+    source: walletSource,
     address: walletAddress,
     network: "solana:mainnet" as const,
     usdcAtomic: usdc.toString(),
@@ -332,6 +336,9 @@ function finish(
   const solCap = conversion.status === "skipped"
     ? (wallet.status === "read" ? 0n : null)
     : solLamports;
+  if (wallet.source === "read_only") {
+    blockers.push("A read-only demo wallet can explore this quote. It cannot produce an approval package.");
+  }
   const comparison = solCap == null ? null : compareSolCap(solCap);
   if (comparison?.exceedsPrevious) {
     blockers.push(`The SOL cap is ${formatFixedMinor(solCap ?? 0n, 9)} SOL, above the previous comparison of ${formatFixedMinor(PREVIOUS_SOL_CAP_LAMPORTS, 9)} SOL. The earlier figure is not a spending authorization.`);
@@ -371,7 +378,7 @@ function finish(
       thailand: "No country restriction is named. This test does not prove shipping to Thailand.",
       orderRead: "A later certificate proves this purchase only when its signed bytes contain bitcoin_anchor, this digest, 1 USDC, the mainnet USDC mint, Solana mainnet, this wallet, and the settlement transaction. Another valid certificate does not.",
       refund: "The store says a failed instant delivery takes no money. A settled payment with no certificate is a defect handled by hand. Nothing here refunds automatically, and this review does not send a letter.",
-      recovery: "A verify URL needs a certificate id. If the purchase response is lost before that id is kept, this build cannot recover it without the original payment or a wallet signature. Neither will be requested.",
+      recovery: "A caller-supplied Idempotency-Key is documented for 24 hours with the same item, payer, and original payment. This review stores the key and does not store a payment. Listing a lost purchase needs a disabled wallet-message claim.",
     },
     accounts,
     wallet,
@@ -392,8 +399,10 @@ function finish(
     },
     recovery: {
       executionReady: false,
-      idempotencyKey: wallet.address ? attemptIdempotencyKey({ wallet: wallet.address, digest: terms.digest, quotedAt: terms.quotedAt }) : null,
-      summary: "Execution is unavailable. A lost response cannot be recovered from an unknown certificate id, and this review does not retain a signed payment.",
+      idempotencyKey: wallet.address ? attemptIdempotencyKey({ wallet: wallet.address, digest: terms.digest }) : null,
+      summary: wallet.source === "connected"
+        ? "Execution is unavailable. The idempotency key is stored for a later same-payment retry. No payment is retained, and the claim signature is disabled."
+        : "This is a read-only exploration. It is not an approval package and it is not stored as a recoverable payment.",
     },
     readyForApproval: bounded,
     blockers: unique,
@@ -418,7 +427,7 @@ function skippedConversion(detail: string): PreparedDigitalPurchase["conversion"
 }
 
 function emptyWallet(): PreparedDigitalPurchase["wallet"] {
-  return { status: "not_read", address: null, network: null, usdcAtomic: null, usdcDisplay: null, solLamports: null, solDisplay: null };
+  return { status: "not_read", source: "not_selected", address: null, network: null, usdcAtomic: null, usdcDisplay: null, solLamports: null, solDisplay: null };
 }
 
 function inspectOrder(order: Awaited<ReturnType<typeof fetchConversionOrder>>, payer: string): { status: "checked" | "rejected"; explanation: string } {

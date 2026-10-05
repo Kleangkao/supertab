@@ -18,6 +18,8 @@ describe.skipIf(!live)("live unpaid digital purchase", () => {
     const walletAddress = authorizedAddress();
     const review = await prepareBitcoinAnchorPurchase({ walletAddress }, { config: readConfig() });
     expect(review.wallet.address).toBe(walletAddress);
+    expect(review.wallet.source).toBe("read_only");
+    expect(review.readyForApproval).toBe(false);
     expect(review.executionReady).toBe(false);
     expect(review.execution).toBe("disabled");
     expect(review.signing).toBe("unavailable");

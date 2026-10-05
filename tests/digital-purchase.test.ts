@@ -128,7 +128,20 @@ describe("prepared purchase", () => {
       }
       throw new Error(`Unexpected ${body.method}`);
     };
-    const review = await prepareBitcoinAnchorPurchase({ walletAddress: wallet }, {
+    const exploration = await prepareBitcoinAnchorPurchase({ walletAddress: wallet }, {
+      config: readConfig({ SOLANA_RPC_URL: "https://rpc.test" }),
+      fetchImpl,
+      now: () => NOW,
+      readBalances: async () => [
+        balance({ mint: USDC_MINT, amount: 2_000_000n, decimals: 6, kind: "stablecoin" }),
+        balance({ mint: NATIVE_SOL_MINT, amount: 20_000_000n, decimals: 9, kind: "native" }),
+      ],
+    });
+    expect(exploration.wallet.source).toBe("read_only");
+    expect(exploration.readyForApproval).toBe(false);
+    expect(exploration.executionReady).toBe(false);
+    expect(exploration.blockers.join(" ")).toMatch(/read-only/);
+    const review = await prepareBitcoinAnchorPurchase({ walletAddress: wallet, walletSource: "connected" }, {
       config: readConfig({ SOLANA_RPC_URL: "https://rpc.test" }),
       fetchImpl,
       now: () => NOW,
@@ -140,6 +153,7 @@ describe("prepared purchase", () => {
     expect(review.execution).toBe("disabled");
     expect(review.orderCreated).toBe(false);
     expect(review.conversion.status).toBe("skipped");
+    expect(review.wallet.source).toBe("connected");
     expect(review.readyForApproval).toBe(true);
     expect(review.executionReady).toBe(false);
     expect(review.wallet.address).toBe(wallet);

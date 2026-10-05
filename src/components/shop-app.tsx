@@ -295,9 +295,10 @@ export function ShopApp() {
         </header>
         {session ? <PrototypePaths compact /> : <PrototypePaths />}
         <DigitalPurchase
-          key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}`}
+          key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}:${walletMode}`}
           address={purchase?.walletKind === "sample" ? "" : address}
           network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : "solana:mainnet"}
+          walletSource={!address || purchase?.walletKind === "sample" || (walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet")) ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
           onUseReadOnly={() => { setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
         />
         <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />

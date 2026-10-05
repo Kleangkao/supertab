@@ -248,8 +248,9 @@ export function compareSolCap(currentLamports: bigint): {
   };
 }
 
-export function attemptIdempotencyKey(input: { wallet: string; digest: string; quotedAt: string }): string {
-  const digest = createHash("sha256").update(`${input.wallet}\n${input.digest}\n${input.quotedAt}`, "utf8").digest("hex");
+/** Stable for one wallet and digest. A later quote time does not mint a second key. */
+export function attemptIdempotencyKey(input: { wallet: string; digest: string }): string {
+  const digest = createHash("sha256").update(`bitcoin_anchor\n${input.wallet}\n${input.digest}`, "utf8").digest("hex");
   return `st-anchor-${digest.slice(0, 32)}`;
 }
 

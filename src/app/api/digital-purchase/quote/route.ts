@@ -12,9 +12,10 @@ export async function POST(request: Request) {
     if (!sameOriginRequest(request)) {
       return Response.json({ error: "Use the prepared purchase from SuperTab." }, { status: 403, headers });
     }
-    const body = await request.json() as { walletAddress?: unknown };
+    const body = await request.json() as { walletAddress?: unknown; walletSource?: unknown };
     const walletAddress = typeof body.walletAddress === "string" ? body.walletAddress : undefined;
-    const review = await prepareBitcoinAnchorPurchase({ walletAddress }, { config: readConfig() });
+    const walletSource = body.walletSource === "connected" ? "connected" : "read_only";
+    const review = await prepareBitcoinAnchorPurchase({ walletAddress, walletSource }, { config: readConfig() });
     return Response.json(review, { headers });
   } catch (error) {
     const message = error instanceof DigitalPurchaseError
