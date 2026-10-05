@@ -41,7 +41,7 @@ export function PrototypePaths({ compact = false }: { compact?: boolean }) {
       <div className="detail-row"><span>Estimated delivery</span><strong>{quote.estimatedDelivery}</strong></div>
       <div className="detail-row"><span>Duties</span><strong>{quote.duties}</strong></div>
       <div className="detail-row"><span>Network fees</span><strong>{quote.networkFees}</strong></div>
-      <p>SuperTab cannot refresh this quote. The store is not on the Shopify checkout allowlist, and no quote call is made from here. Open the merchant and calculate a new total there.</p>
+      <p>For a current price and delivery options, open the merchant, add the Medium tee to your cart, and review checkout. SuperTab does not refresh this recorded quote.</p>
       <p>Opening the merchant does not submit an address, connect a wallet, approve a purchase, or pay. Payment, approval, funding, and signing stay unavailable from this record.</p>
       <div className="wallet-actions">
         <a className="secondary" href={quote.freshQuoteUrl} target="_blank" rel="noreferrer">Open Solana Spaces for a fresh quote</a>
@@ -59,7 +59,7 @@ export function PrototypePaths({ compact = false }: { compact?: boolean }) {
       <p className="eyebrow">DEVNET TEST PURCHASE</p>
       <h3>Devnet test marker</h3>
       <p>This is a separate owner-controlled product. It is not the Just Build It Tee, and paying it does not buy the shirt.</p>
-      <p>On the devnet page: connect Phantom on Solana devnet, review the merchant checkout, approve that total, sign, then send. The merchant confirms the order. A refund returns that test payment. Each of those actions asks before it signs or sends.</p>
+      <p>On the devnet page: connect Phantom on Solana devnet, review the merchant checkout, approve that total, sign, then send. The merchant confirms the order. A refund returns that test payment; its button requests a wallet signature and then sends the refund.</p>
       <p>The USDC amount is the test merchant’s price. Devnet SOL pays the network fee separately and does not change the USDC total.</p>
       <div className="wallet-actions">
         <Link className="secondary" href="/devnet">Open devnet test purchase</Link>

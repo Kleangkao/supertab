@@ -22,6 +22,8 @@ The devnet USDC amount is the test price. Devnet SOL is only the network fee.
 
 ## Two-minute presenter flow
 
+Historical shopping and simulated-card rehearsal below. Use the prototype script above for the current presentation. The matrix below predates the verified Phantom devnet purchase/refund and must not be used as the current capability summary. CardRail remains unconnected and is not required by the current prototype.
+
 1. Ask for a black polo under $50. Explain that these are real provider listings, with actual merchant names and prices. Follow up with a preference to show conversation constraints persist.
 2. Select a product. Show its variant and merchant-review link. Say: "This is the listed amount. Final shipping and tax still need the merchant's checkout; SuperTab will not call this a verified payable total."
 3. Choose the explicit real demo wallet in read-only mode, or enter an authorized public Solana address. Show USDC already present, the funding gap, the selected funding asset and the SOL reserve.
