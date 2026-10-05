@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
 import { AssetConversion } from "@/components/asset-conversion";
+import { DigitalPurchase } from "@/components/digital-purchase";
 import { PrototypePaths } from "@/components/prototype-paths";
 import { CheckoutReview } from "@/components/checkout-review";
 import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet, type StandardWalletAccount } from "@/lib/wallet-standard";
@@ -290,6 +291,7 @@ export function ShopApp() {
           {!session && <p className="hero-copy">Tell us what you’re looking for. SuperTab finds real products and helps you plan how to fund them with your Solana assets.</p>}
         </header>
         {session ? <PrototypePaths compact /> : <PrototypePaths />}
+        <DigitalPurchase suggestedAddress={purchase?.walletKind === "sample" ? "" : (purchase?.walletAddress ?? DEMO_ADDRESS)} />
         <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : purchase?.walletAddress ?? "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : purchase?.walletAddress ?? ""} />
         <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
         {!session && <div className="wallet-control"><p className="section-copy">Connect a wallet and sign a control message before you shop. This approves no purchase and moves no funds.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}

@@ -1,5 +1,9 @@
 # Purchase route decision — October 4, 2026
 
+## October 5: prepared digital purchase, not paid
+
+The physical-store search stays closed. For a digital product of at most 2 USDC, SCVD General Store’s “A Bitcoin Anchor” is the prepared purchase. SuperTab reads the unpaid HTTP 402, checks Solana mainnet USDC, and, when the wallet is short, checks one unsigned SOL-to-USDC conversion sized from minimum received. It does not build the merchant payment transaction, create a checkout session, or write an order. The order proof after a future payment is `GET https://scvd.store/api/verify/{cert_id}`. Paying on the merchant website alone would not prove this path. The verified numbers, the expired quote, and the spending cap are in `docs/PROJECT_STATE.md`. Utilia and a Bitrefill Thailand eSIM were the other two candidates and did not qualify. No mainnet funds moved.
+
 ## October 5: authorized real-merchant quote only
 
 The owner authorized using their delivery address solely to calculate a quote. It is intentionally omitted here. The guest checkout at https://solanaspaces.com/checkout accepted the Thailand destination and returned delivery rates for one Just Build It Tee, Medium. GlobalPost Economy was selected by default: item $35.00, shipping $20.53, displayed tax $0.00, merchant total $55.53. Estimated delivery was October 19. The payment section visibly offered Solana wallets and USDC at $55.53. No duties were itemized, so this does not establish a duties-inclusive landed cost. Network fees were not verified. No wallet was connected, signature requested, payment submitted, or order placed. Complete Purchase remained disabled. A reserved example.com email was used for the quote test. This is live merchant quote evidence, separate from the completed owner-controlled devnet purchase/refund.

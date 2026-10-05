@@ -2,6 +2,8 @@
 
 Historical research, moved out of docs/PROJECT_STATE.md on October 5, 2026. These notes record checks that did not produce an order from an unrelated retailer. They are not a new survey and they are not instructions to repeat those calls.
 
+The SCVD row below was closed because the milestone then required a shipped product. On October 5 it was reconsidered for one digital product at or below 2 USDC. That prepared, unpaid quote is in `docs/PROJECT_STATE.md`. Do not repeat the Utilia or Bitrefill checks recorded there.
+
 ## Failed hypotheses
 
 Reconsider only with new evidence. Do not repeat the same calls.

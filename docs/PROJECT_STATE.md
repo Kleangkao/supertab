@@ -1,5 +1,25 @@
 # SuperTab project state
 
+## Prepared digital purchase — October 5, 2026
+
+This is a quote and an unsigned conversion check. No swap, payment, signature, or order was made.
+
+LIVE READ-ONLY. In the browser at 2026-10-05T14:39:47.246Z, **Request fresh quote** called SuperTab and showed an unpaid merchant total of 1.000000 USDC, expiring 2026-10-05T14:44:47.246Z. The Solana option was mainnet USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, with the network fee assigned to the quoted sponsor. The panel showed 0.000004 USDC and 0.057052346 SOL, a conversion input of 0.008579726 SOL, a minimum of 1.019995 USDC at 50 bps, and a proposed SOL cap of 0.008585479 SOL. It did not show the wallet address, and the page had no sign, send, or pay button. An earlier service read at 14:35:53Z had the same 1.000000 USDC price and a SOL cap of 0.008587738; that check passed on the unsigned conversion and was not signed. One sizing request before that returned HTTP 400 route-not-found. A later route refusal stays on the quote screen.
+
+The product is SCVD General Store’s “A Bitcoin Anchor,” quantity 1, sold by Record Creative Co. LLC. It is a one-time digital OpenTimestamps submission. Delivery is a signed certificate and a proof URL in the purchase response. Thailand is not named as a restriction, and the listing has no shipping, account, or subscription. A failed instant delivery is a defect reported with `POST https://scvd.store/api/letter`; the keeper refunds by hand. That is not escrow and was not tested with a payment.
+
+The 14:35:53Z service read found the shopper’s mainnet USDC account and the merchant USDC account already present. USDC did not cover 1 USDC, so conversion is required. That read checked an unsigned transaction for 0.008581722 SOL, minimum received 1.019996 USDC, estimated output 1.025121 USDC, slippage 50 bps, and a 1016 lamport prioritization fee. The bytes were not kept or sent. The browser quote above is the later payable figure, and it has the same 1 USDC price.
+
+PREPARED, NOT EXECUTED. The proposed maximum from the browser read is the exact 1.000000 USDC merchant total plus 0.008585479 SOL. The 0.01 SOL reserve is not part of the cap. USDC above the 1 USDC payment stays in the wallet. The merchant-payment network fee is charged to the quoted sponsor, not the shopper, only while the fee payer stays a different account. The page can request a fresh quote. It has no sign or send control. A fresh quote replaces these amounts; approval has to name this product and the cap then on screen. A merchant total above 2 USDC is rejected. This quote expires at 14:44:47Z and is evidence, not spending approval.
+
+ORDER PROOF, NOT YET AVAILABLE. After a future authorized payment, the merchant response carries `cert_id`. SuperTab would read `GET https://scvd.store/api/verify/{cert_id}`. This product does not use a human order id. No checkout session was created. Paying only on the merchant website would not exercise this SuperTab path.
+
+OTHER CANDIDATES, NOT SELECTED. Utilia’s fee URL failed TLS with `SEC_E_UNTRUSTED_ROOT`, so its mint, network, and order read were not verified. Bitrefill’s published Thailand eSIM starts near $2.89, above the 2 USDC product budget, and the product page returned a Cloudflare interstitial rather than a checkout. No invoice was created.
+
+FIXTURES. `tests/digital-purchase.test.ts` rejects a non-integer amount, the wrong USDC mint, a price above 2 USDC, and a quote with no Solana option. It sizes a conversion from minimum received and refuses an input equal to the whole wallet. A covered balance skips conversion. A refused DFlow route leaves the merchant total visible and the purchase not ready. Those fixtures are not the live 402.
+
+The Solana Spaces tee quote below stays recorded evidence. The devnet payment, refund, and two paid orders were not changed. Executed conversion remains unproven.
+
 ## Latest quote evidence — October 5, 2026
 
 With owner-authorized delivery information (not stored in this document), Solana Spaces returned Thailand shipping rates for one Just Build It Tee, Medium: item $35.00 + GlobalPost Economy $20.53 + displayed tax $0.00 = merchant total $55.53; estimated arrival October 19. Its payment section visibly offered USDC and Solana wallets. Duties and network fees remain unverified. No wallet connection, signing, payment, or order placement occurred. This supersedes the earlier street-address blocker. Preserve the separation between this live quote and the completed controlled devnet order. Do not spend mainnet funds.
@@ -33,9 +53,10 @@ From `supertab-main`, in two terminals:
 
 Open `http://localhost:3000`. No new payment is required.
 
-1. Under **Real product — quote only**, read the Just Build It Tee evidence: date, destination scope, item, shipping, tax, merchant total, visible USDC option, and unverified duties and network fees. Confirm there is no approve, sign, or pay action. The merchant link only opens Solana Spaces for a fresh quote.
-2. Under **Devnet test purchase**, choose **View verified test order**, or open `http://localhost:3000/devnet` and use the same action. The status comes back from the merchant. For `e485b032-7abd-4a59-849c-f37775ec57c6`, expect `refunded` and both signatures above, while the merchant still has that record.
-3. A new checkout is a separate payment. Do not start one to repeat this evidence. The devnet marker is not the tee.
+1. Under **Prepared purchase — not paid**, choose **Request fresh quote**. Read the merchant, “A Bitcoin Anchor,” quantity 1, the mainnet USDC mint, the merchant total, the expiry, the wallet balances, the conversion minimum, and the SOL cap. Confirm there is no sign, send, or pay control. The quote in the section above has expired; the button asks for a new one and still does not pay.
+2. Under **Real product — quote only**, read the Just Build It Tee evidence: date, destination scope, item, shipping, tax, merchant total, visible USDC option, and unverified duties and network fees. Confirm there is no approve, sign, or pay action. The merchant link only opens Solana Spaces for a fresh quote.
+3. Under **Devnet test purchase**, choose **View verified test order**, or open `http://localhost:3000/devnet` and use the same action. The status comes back from the merchant. For `e485b032-7abd-4a59-849c-f37775ec57c6`, expect `refunded` and both signatures above, while the merchant still has that record.
+4. A new checkout is a separate payment. Do not start one to repeat this evidence. The devnet marker is not the tee.
 
 The USDC total on the devnet page is the test merchant’s price. Devnet SOL pays the network base fee. Phantom may add a priority fee up to 0.0001 devnet SOL. That fee does not change the USDC amount.
 
@@ -63,8 +84,8 @@ Devnet checkout funding is unchanged and still uses confirmed devnet balances on
 
 ## Checks
 
-On October 5, 2026, `npx vitest run` passed 144 tests and skipped 6. `SUPERTAB_LIVE=1 npx vitest run tests/live/dflow.live.test.ts` passed 3 tests, including a real mainnet SOL to USDC quote and an unsigned-transaction check. ESLint reported no errors on the conversion files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. In the browser, a 0.01 SOL quote showed the mints, minimum received, 50 bps as 0.50%, the recorded $55.53 comparison, and a checked unsigned transaction for a public address. An amount with more than 9 decimal places was rejected. No signature was requested and nothing was sent. The two paid devnet orders were not opened.
+On October 5, 2026, `npx vitest run` passed 149 tests and skipped 7. With `SUPERTAB_LIVE=1`, the unpaid digital-purchase read and the existing read-only live checks passed, and nothing was signed or sent. ESLint reported no errors on the digital-purchase files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. In the browser, **Request fresh quote** showed 1.000000 USDC, the mainnet mint, a SOL conversion sized from the minimum received, and a SOL cap, with no sign or send control. The two paid devnet orders were not opened.
 
 ## Next action
 
-Use the prototype on the shopping page. Review a mainnet conversion quote without signing. The Solana Spaces quote stays quote-only. The devnet order is read from the merchant and is not a shirt purchase. Duties and network fees on the retail quote remain unverified. Do not sign or place a Solana Spaces order. No mainnet purchase is authorized. An executed asset conversion still requires a route that can be signed and confirmed; DFlow does not provide that route on devnet.
+Request a fresh Bitcoin Anchor quote on the shopping page and do not sign it. Spending approval has to name SCVD “A Bitcoin Anchor,” quantity 1, and the merchant total and SOL cap shown on that fresh quote. The last verified cap, from the 14:39:47Z browser read, was 1.000000 USDC plus 0.008585479 SOL, and that quote expired at 14:44:47Z. A general instruction to continue is not approval. The Solana Spaces quote stays quote-only. Do not start another devnet payment. Executed conversion and delivery remain unproven.
