@@ -49,10 +49,22 @@ SuperTab does not refresh this quote. Solana Spaces is not on the Shopify checko
 
 The verified devnet order `e485b032-7abd-4a59-849c-f37775ec57c6` remains a separate owner-controlled refund. It does not pay for this shirt.
 
+## Asset conversion — October 5, 2026
+
+A shopper can review a DFlow quote from a mainnet asset into mainnet USDC. The quote shows the network, both mints, the exact input, the estimated output, the minimum received, slippage, the disclosed provider fee, the prioritization fee when DFlow returns one, the quote time, and SuperTab’s 45-second expiration. Nothing is signed or sent. The estimated output is not added to a USDC balance and is not subtracted from a funding gap. A comparison with the recorded $55.53 Solana Spaces total is labeled as recorded evidence, not a current payable total.
+
+LIVE. On October 5, 2026, `https://dev-quote-api.dflow.net` returned a mainnet quote for 10000000 base units of wrapped SOL (`So11111111111111111111111111111111111111112`) into mainnet USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). A second request for public key `vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg` returned an unsigned transaction. SuperTab checked the fee payer, the input and output mints, the embedded input and expected output, the payer’s mainnet USDC account, the disclosed lookup tables, and the prioritization fee. The check passed. The transaction was not simulated, signed, or broadcast. Output amounts move with the market, so the page shows the current quote rather than a stored price.
+
+NO DEVNET ROUTE. The same host, asked to convert that wrapped-SOL amount into Circle devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`), returned HTTP 400 `route_not_found`. Sending `cluster=devnet` did not change the result. DFlow’s dev host is an unauthenticated mainnet API tier, not Solana devnet. The panel records this finding and does not ask again. Executed conversion remains unproven. No devnet swap was prepared for signature.
+
+FIXTURES. `tests/conversion-review.test.ts` uses labeled fixtures, not live swaps. It rejects a symbol used as a mint, mainnet USDC as the input, Circle devnet USDC on a mainnet quote, and extra decimal places. It expires a quote at 45 seconds. It separates insufficient input from insufficient SOL for fees. It rejects a provider HTTP 500, an altered output amount, a different fee payer, a token Approve, and an undisclosed lookup table. A passing fixture is not a live conversion.
+
+Devnet checkout funding is unchanged and still uses confirmed devnet balances only. Orders `ab0421c2-e708-40cd-b30c-a1e2a433b512` and `3518beef-1b53-4e5c-8682-0baca6b1c3fa` were not touched.
+
 ## Checks
 
-On October 5, 2026, `npx vitest run` passed 138 tests and skipped 5. ESLint reported no errors on the prototype files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. Browser checks read the merchant’s refunded order and a missing order; they did not create a transaction.
+On October 5, 2026, `npx vitest run` passed 144 tests and skipped 6. `SUPERTAB_LIVE=1 npx vitest run tests/live/dflow.live.test.ts` passed 3 tests, including a real mainnet SOL to USDC quote and an unsigned-transaction check. ESLint reported no errors on the conversion files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. In the browser, a 0.01 SOL quote showed the mints, minimum received, 50 bps as 0.50%, the recorded $55.53 comparison, and a checked unsigned transaction for a public address. An amount with more than 9 decimal places was rejected. No signature was requested and nothing was sent. The two paid devnet orders were not opened.
 
 ## Next action
 
-Use the prototype on the shopping page. The Solana Spaces quote stays quote-only. The devnet order is read from the merchant and is not a shirt purchase. Duties and network fees on the retail quote remain unverified. Do not sign or place a Solana Spaces order. No mainnet purchase is authorized.
+Use the prototype on the shopping page. Review a mainnet conversion quote without signing. The Solana Spaces quote stays quote-only. The devnet order is read from the merchant and is not a shirt purchase. Duties and network fees on the retail quote remain unverified. Do not sign or place a Solana Spaces order. No mainnet purchase is authorized. An executed asset conversion still requires a route that can be signed and confirmed; DFlow does not provide that route on devnet.

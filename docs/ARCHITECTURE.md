@@ -26,6 +26,8 @@ The optional `/api/wallet/devnet` diagnostic requires current wallet-control pro
 
 `fetchDflowOrder` calls `GET /order` on `DFLOW_QUOTE_BASE_URL`. Production is `https://quote-api.dflow.net` and sends `x-api-key`. The dev host works without a key. The request does not pass a wallet, so DFlow does not return a transaction. `executeSwap`, `executeCardPayment`, and `broadcastTransaction` always throw.
 
+The shopping page's **Asset conversion — quote only** panel calls the same order API for a chosen mainnet mint into mainnet USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. When a wallet address is present, the server also asks for an unsigned transaction and checks the payer, mints, embedded amounts, the payer's USDC account, disclosed lookup tables, and the prioritization fee. The transaction bytes are not sent to the browser. The estimated output is not added to a USDC balance or subtracted from a funding gap. Coverage against the October 5 Solana Spaces total is a comparison with that recorded evidence. Circle devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` has no DFlow route; the panel records that finding and does not request another one. Devnet checkout funding still uses confirmed devnet balances only.
+
 ## Purchase and card rail
 
 Purchase states move through checkout, funding, and an optional quote. If USDC already covers the known amount, the state becomes `PAYMENT_RAIL_UNAVAILABLE`. A live quote can reach `SWAP_QUOTE_READY` and then `AWAITING_SWAP_APPROVAL`. Approval does not enter `SWAP_PENDING`.

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { readConfig } from "../../src/lib/config";
+import { requestConversionQuote } from "../../src/lib/conversion-service";
 import { fetchDflowOrder, fetchPreparedTransaction } from "../../src/lib/dflow";
-import { USDC_MINT, WSOL_MINT } from "../../src/lib/tokens";
+import { NATIVE_SOL_MINT, USDC_MINT, WSOL_MINT } from "../../src/lib/tokens";
 
 const live = process.env.SUPERTAB_LIVE === "1";
 
@@ -36,5 +38,30 @@ describe.skipIf(!live)("live read-only providers", () => {
     expect(["legacy", "v0"]).toContain(prepared.version);
     expect(prepared.byteLength).toBeGreaterThan(64);
     expect(JSON.stringify(prepared, (_key, value) => typeof value === "bigint" ? value.toString() : value)).not.toMatch(/[A-Za-z0-9+/]{80}/);
+  });
+
+  it("reviews a real mainnet SOL to USDC quote and checks the unsigned transaction without sending it", async () => {
+    const userPublicKey = process.env.SUPERTAB_PUBLIC_ADDRESS || "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg";
+    const review = await requestConversionQuote({
+      network: "solana:mainnet-beta",
+      inputMint: NATIVE_SOL_MINT,
+      amountText: "0.01",
+      assetKind: "native",
+      walletAddress: userPublicKey,
+    }, {
+      config: readConfig(),
+      fetchImpl: fetch,
+    });
+    if (!("validation" in review)) throw new Error("expected a mainnet quote");
+    expect(review.outputMint).toBe(USDC_MINT);
+    expect(review.inputMint).toBe(WSOL_MINT);
+    expect(review.completed).toBe(false);
+    expect(review.signing).toBe("unavailable");
+    expect(review.broadcast).toBe("unavailable");
+    expect(review.walletUsdcIncludesQuote).toBe(false);
+    expect(BigInt(review.estimatedOutputBase)).toBeGreaterThan(0n);
+    expect(BigInt(review.minimumOutputBase)).toBeLessThanOrEqual(BigInt(review.estimatedOutputBase));
+    expect(review.validation.status, review.validation.explanation).toBe("checked");
+    expect(JSON.stringify(review)).not.toMatch(/[A-Za-z0-9+/]{80}/);
   });
 });

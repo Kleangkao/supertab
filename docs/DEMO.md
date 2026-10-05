@@ -17,8 +17,10 @@ Open http://localhost:3000.
 2. If you want a current merchant total, use **Open Solana Spaces for a fresh quote**. That leaves SuperTab. Do not pay.
 3. Choose **View verified test order**. SuperTab reads order `e485b032-7abd-4a59-849c-f37775ec57c6` from the local merchant. Say the status the merchant returns. Do not describe the page as creating that order.
 4. Optional: open **Devnet test purchase** at http://localhost:3000/devnet and use the same view action. Leave the two earlier paid orders as they are. Do not start a checkout.
+5. Under **Asset conversion — quote only**, read the devnet finding: DFlow has no route from wrapped SOL into Circle devnet USDC. Do not treat that card as a swap.
+6. For a mainnet quote, leave the address empty or enter a public Solana address. Choose SOL and `0.01`, then **Request quote**. Read the input mint, mainnet USDC mint, estimated output, minimum received, slippage, provider fee, and network-fee note. The quote expires 45 seconds after it arrives. The recorded $55.53 comparison is the October 5 Solana Spaces evidence, not a payable total. There is no sign or send control. A checked transaction was not broadcast.
 
-The devnet USDC amount is the test price. Devnet SOL is only the network fee.
+The devnet USDC amount is the test price. Devnet SOL is only the network fee. Devnet checkout does not use the conversion quote.
 
 ## Two-minute presenter flow
 
@@ -42,7 +44,7 @@ Historical shopping and simulated-card rehearsal below. Use the prototype script
 | Wallet connection | Wallet Standard discovery/connect and explicit message-control checks; real Ed25519 verification in deterministic tests | Extension signing remains unproven in the in-app browser. Message proof is not transaction or purchase approval |
 | Devnet transaction signing | Optional exact-memo sign-only path with signature verification; live devnet blockhash/fee-format checks pass | Real extension ceremony unproven; no broadcast, conversion or USDC readiness implied |
 | Funding | Integer amounts, existing canonical USDC, reserved SOL, selected asset | Current amount is a planning amount; sample assets are labeled |
-| DFlow | Live quotes and structurally valid unsigned preparation verified | No signing, broadcast, executed swap or execution simulation |
+| DFlow | Live mainnet quotes; unsigned transactions checked for payer, mints, amounts, destination, and disclosed fee | No signing, broadcast, simulation, or executed swap. No devnet USDC route |
 | Final-total integration | Authenticated Shopify `get_checkout`, exact variant/quantity binding, integer breakdown checks and five-minute freshness; deterministic adapter/service tests | Existing checkout reference and explicitly configured merchant origin required; live final-total acceptance remains unproven |
 | Purchase approval | Final-total gate returns HTTP 403 when total is unknown; verified totals support consent bound to current terms | Catalog planning cannot become approved merchant payment; approval does not submit payment |
 | CardRail | Provider-neutral interface and Bridge sandbox adapter | Access blocked; no issued card or provider payment readiness proof |

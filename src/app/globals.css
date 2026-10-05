@@ -51,6 +51,12 @@ a { color:inherit; }
 .path-card .wallet-actions { margin:12px 0; }
 .path-card a.secondary { text-decoration:none; }
 .prototype-paths summary { font-size:13px; margin-bottom:8px; }
+.conversion-panel { margin:8px 0 28px; }
+.conversion-panel h2 { font-size:28px; font-weight:550; letter-spacing:-1px; margin:0 0 8px; }
+.conversion-panel > p { color:var(--muted); font-size:14px; line-height:1.7; max-width:720px; }
+.conversion-panel .asset-select input { width:100%; background:white; border:1px solid var(--line); padding:9px; border-radius:8px; margin-top:7px; color:var(--foreground); }
+.conversion-result { margin-top:18px; }
+.conversion-result p { margin:10px 0; }
 .intro-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:36px; border-top:1px solid var(--line); padding:30px 0 60px; }
 .intro-steps span { font-size:10px; letter-spacing:1.5px; color:#77926a; }
 .intro-steps h2 { font-size:16px; font-weight:550; margin:12px 0 8px; }

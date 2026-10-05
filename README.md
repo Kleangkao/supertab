@@ -14,7 +14,7 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - A read-only Solana address lookup, plus a clearly labeled sample-asset preview.
 - Wallet Standard discovery handles wallets that register after the page loads, deduplicates extensions and lets the shopper choose between multiple wallets. An empty connection response cannot reuse an old account.
 - A funding plan that uses integer token math.
-- A live DFlow quote from the dev API, without a signature or a broadcast.
+- A live DFlow quote from the dev API, without a signature or a broadcast. The shopping page can review one mainnet asset-to-USDC quote, its minimum and fees, and a local check of the unsigned transaction. Circle devnet USDC has no DFlow route, so an executed conversion is still unproven.
 - Real unsigned transaction preparation for a public wallet, with structural format checks. The preparation response supplies the displayed quote; no transaction payload or key is sent to the browser.
 - Quote expiry countdown, refresh without losing the selected product, and browser refresh recovery while the server session remains available.
 - A purchase review that keeps payment and merchant order separate.

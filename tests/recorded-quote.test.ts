@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { recordedQuoteCanStartPayment, recordedTeeQuote } from "../src/lib/recorded-merchant-quote";
+import { formatFixedMinor } from "../src/lib/money";
+import { RECORDED_TEE_MERCHANT_TOTAL_USDC_BASE, recordedQuoteCanStartPayment, recordedTeeQuote } from "../src/lib/recorded-merchant-quote";
 
 it("keeps the October 5 Solana Spaces tee quote as non-payable evidence", () => {
   expect(recordedTeeQuote).toMatchObject({
@@ -24,6 +25,7 @@ it("keeps the October 5 Solana Spaces tee quote as non-payable evidence", () => 
     freshQuoteUrl: "https://solanaspaces.com/checkout",
   });
   expect(recordedQuoteCanStartPayment()).toBe(false);
+  expect(formatFixedMinor(RECORDED_TEE_MERCHANT_TOTAL_USDC_BASE, 6)).toBe("55.530000");
 });
 
 it("does not store a buyer name, street, email, or phone with the quote", () => {

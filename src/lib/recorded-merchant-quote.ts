@@ -26,6 +26,9 @@ export const recordedTeeQuote = {
   freshQuoteUrl: "https://solanaspaces.com/checkout",
 } as const;
 
+/** $55.53 in 6-decimal USDC base units. Comparison evidence only, not a payable total. */
+export const RECORDED_TEE_MERCHANT_TOTAL_USDC_BASE = 55_530_000n;
+
 export function recordedQuoteCanStartPayment(): false {
   return false;
 }

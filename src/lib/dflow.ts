@@ -22,6 +22,10 @@ export interface DflowQuote {
   slippageBps: number | null;
   priceImpactPct: string | null;
   platformFeeText: string | null;
+  platformFeeAmount: bigint | null;
+  platformFeeBps: number | null;
+  platformFeeMode: string | null;
+  prioritizationFeeLamports: bigint | null;
   contextSlot: number | null;
   lastValidBlockHeight: number | null;
   executionMode: string | null;
@@ -177,6 +181,8 @@ export function parseDflowOrder(payload: unknown): DflowQuote {
     slippageBps: typeof record.slippageBps === "number" ? record.slippageBps : null,
     priceImpactPct: typeof record.priceImpactPct === "string" ? record.priceImpactPct : null,
     platformFeeText: platformFeeLabel(record.platformFee),
+    ...readPlatformFee(record.platformFee),
+    prioritizationFeeLamports: readLamports(record.prioritizationFeeLamports),
     contextSlot: typeof record.contextSlot === "number" ? record.contextSlot : null,
     lastValidBlockHeight: typeof record.lastValidBlockHeight === "number" ? record.lastValidBlockHeight : null,
     executionMode: typeof record.executionMode === "string" ? record.executionMode : null,
@@ -348,6 +354,83 @@ function requiredBaseUnits(value: unknown, name: string): bigint {
     throw new Error(`DFlow quote is missing ${name}.`);
   }
   return BigInt(value);
+}
+
+function readPlatformFee(value: unknown): {
+  platformFeeAmount: bigint | null;
+  platformFeeBps: number | null;
+  platformFeeMode: string | null;
+} {
+  if (!value || typeof value !== "object") {
+    return { platformFeeAmount: null, platformFeeBps: null, platformFeeMode: null };
+  }
+  const record = value as Record<string, unknown>;
+  const amount = typeof record.amount === "string" && /^\d+$/.test(record.amount) ? BigInt(record.amount) : null;
+  const feeBps = typeof record.feeBps === "number" && Number.isInteger(record.feeBps) ? record.feeBps : null;
+  const mode = typeof record.mode === "string" ? record.mode : null;
+  return { platformFeeAmount: amount, platformFeeBps: feeBps, platformFeeMode: mode };
+}
+
+function readLamports(value: unknown): bigint | null {
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
+  return null;
+}
+
+export interface ConversionOrder {
+  quote: DflowQuote;
+  transactionBase64: string | null;
+  lookupTables: unknown;
+}
+
+/** One DFlow order. A public key asks for an unsigned transaction and does not sign or send it. */
+export async function fetchConversionOrder(
+  input: { inputMint: string; outputMint: string; amount: bigint; userPublicKey?: string; wrapAndUnwrapSol?: boolean },
+  options: DflowClientOptions,
+): Promise<ConversionOrder> {
+  if (input.amount <= 0n) throw new Error("Quote amount must be positive.");
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const params = new URLSearchParams({
+    inputMint: input.inputMint,
+    outputMint: input.outputMint,
+    amount: input.amount.toString(),
+    slippageBps: String(options.slippageBps ?? 50),
+  });
+  if (input.wrapAndUnwrapSol) params.set("wrapAndUnwrapSol", "true");
+  if (input.userPublicKey) {
+    params.set("userPublicKey", input.userPublicKey);
+    params.set("includeAddressLookupTables", "true");
+  }
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (options.apiKey) headers["x-api-key"] = options.apiKey;
+  const response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}/order?${params.toString()}`, {
+    headers,
+    signal: AbortSignal.timeout(options.timeoutMs ?? 12_000),
+  });
+  const text = await response.text();
+  const payload = text ? safeJson(text) : null;
+  if (!response.ok) {
+    const message = typeof payload === "object" && payload && "msg" in payload
+      ? String((payload as { msg?: unknown }).msg ?? "")
+      : "";
+    if (response.status === 400 || /route|liquidity/i.test(message)) {
+      throw new DflowRouteError(message || undefined);
+    }
+    throw new Error(`DFlow quote failed (${response.status}).`);
+  }
+  const quote = parseDflowOrder(payload);
+  if (quote.inputMint !== input.inputMint || quote.outputMint !== input.outputMint) {
+    throw new Error("DFlow quote mints did not match the request.");
+  }
+  if (quote.inAmount !== input.amount) {
+    throw new Error("DFlow quote input amount did not match the request.");
+  }
+  const record = payload as Record<string, unknown>;
+  return {
+    quote,
+    transactionBase64: typeof record.transaction === "string" && record.transaction.length > 0 ? record.transaction : null,
+    lookupTables: record.addressLookupTables ?? null,
+  };
 }
 
 function platformFeeLabel(value: unknown): string | null {
