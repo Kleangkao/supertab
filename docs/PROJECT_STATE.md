@@ -1,5 +1,19 @@
 # SuperTab project state
 
+## Spending review — October 5, 2026
+
+This is a digital timestamping-service test for SCVD General Store’s “A Bitcoin Anchor,” quantity 1. It can later prove SOL to USDC, a merchant payment, and a certificate for one digest. It does not prove a physical purchase or shipping to Thailand. No swap, payment, signature, or order was made. Execution remains unavailable.
+
+LIVE READ-ONLY. The official item page, fetched the same day, says the buyer submits a 64-character sha256 digest and may add an optional label. SuperTab uses the public preimage `SuperTab purchase probe 2026-10-05 bitcoin_anchor` and shows it before any approval. Only its digest is submitted. The store says it never sees the preimage. The purchase response can return the signed certificate while the OpenTimestamps proof is still pending; Bitcoin confirmation is a later upgrade. A certificate is submission evidence. A pending proof is not a completed anchor.
+
+In the browser, after choosing the read-only demo wallet and **Refresh unpaid quote**, the review showed Solana mainnet, that wallet’s public address, 1.000000 USDC, mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, and sponsor `Hc3sdEAsCGQcpgfivywog9uwtk8gUBUZgsxdME1EJy88`. The wallet still held 0.000004 USDC and 0.057052346 SOL, so conversion was required. The conversion input was 0.008570754 SOL, the minimum received was 1.019992 USDC, slippage stayed 50 bps, and the SOL cap was 0.008577266 SOL. That cap is below the previous comparison of 0.008585479 SOL. The earlier figure is not authorization. The 0.01 SOL reserve stays in the wallet. The 1 USDC total is what the conversion funds, not a second SOL spend. The merchant quote expired at 2026-10-05T15:09:09.445Z and the conversion quote expired 45 seconds after it was checked. Refreshing does not approve the purchase. The page had no sign, send, or pay control.
+
+CORRELATION. The current listing says a certificate’s signed bytes include the item, the digest in `attests`, the USDC amount, the asset, the network, the payer, and the settlement transaction. A public sample verify, `cert_4dww28dx5j`, is a different item and does not prove this purchase. Verification reads `GET https://scvd.store/api/verify/{cert_id}` for a known id only.
+
+RECOVERY, NOT EXECUTION-READY. The store documents an idempotency key and a same-payment retry, and `/api/claims` requires proof of the paying wallet. This build prepares a key but does not send it and does not retain a signed payment. If the purchase response is lost before a certificate id is kept, verify-by-id cannot find the order. No second swap or payment is allowed. The letter and refund endpoints were not called.
+
+FIXTURES. `tests/digital-purchase.test.ts` covers a changed recipient, an expired quote, a wallet or network change, a SOL cap above the previous comparison, a certificate for the wrong item or digest or payer or amount, and a lost response. Those fixtures do not pay.
+
 ## Prepared digital purchase — October 5, 2026
 
 This is a quote and an unsigned conversion check. No swap, payment, signature, or order was made.
@@ -53,7 +67,7 @@ From `supertab-main`, in two terminals:
 
 Open `http://localhost:3000`. No new payment is required.
 
-1. Under **Prepared purchase — not paid**, choose **Request fresh quote**. Read the merchant, “A Bitcoin Anchor,” quantity 1, the mainnet USDC mint, the merchant total, the expiry, the wallet balances, the conversion minimum, and the SOL cap. Confirm there is no sign, send, or pay control. The quote in the section above has expired; the button asks for a new one and still does not pay.
+1. Under **Timestamp service — quote only**, choose **Use read-only demo wallet**, then **Refresh unpaid quote**. Read the public address, Solana mainnet, the payload and digest, the 1 USDC total, the conversion minimum, and the SOL cap. The 15:04Z browser read has expired. Refreshing does not approve a purchase. Execution stays unavailable because a lost response cannot be recovered without the original payment or a wallet signature. Confirm there is no sign, send, or pay control.
 2. Under **Real product — quote only**, read the Just Build It Tee evidence: date, destination scope, item, shipping, tax, merchant total, visible USDC option, and unverified duties and network fees. Confirm there is no approve, sign, or pay action. The merchant link only opens Solana Spaces for a fresh quote.
 3. Under **Devnet test purchase**, choose **View verified test order**, or open `http://localhost:3000/devnet` and use the same action. The status comes back from the merchant. For `e485b032-7abd-4a59-849c-f37775ec57c6`, expect `refunded` and both signatures above, while the merchant still has that record.
 4. A new checkout is a separate payment. Do not start one to repeat this evidence. The devnet marker is not the tee.
@@ -84,8 +98,8 @@ Devnet checkout funding is unchanged and still uses confirmed devnet balances on
 
 ## Checks
 
-On October 5, 2026, `npx vitest run` passed 149 tests and skipped 7. With `SUPERTAB_LIVE=1`, the unpaid digital-purchase read and the existing read-only live checks passed, and nothing was signed or sent. ESLint reported no errors on the digital-purchase files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. In the browser, **Request fresh quote** showed 1.000000 USDC, the mainnet mint, a SOL conversion sized from the minimum received, and a SOL cap, with no sign or send control. The two paid devnet orders were not opened.
+On October 5, 2026, `npx vitest run` passed 152 tests and skipped 7. With `SUPERTAB_LIVE=1`, the unpaid digital-purchase read passed, and nothing was signed or sent. ESLint reported no errors on the digital-purchase files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. In the browser, the read-only wallet review showed the payload, 1.000000 USDC, a SOL cap of 0.008577266, and execution unavailable. The two paid devnet orders were not opened.
 
 ## Next action
 
-Request a fresh Bitcoin Anchor quote on the shopping page and do not sign it. Spending approval has to name SCVD “A Bitcoin Anchor,” quantity 1, and the merchant total and SOL cap shown on that fresh quote. The last verified cap, from the 14:39:47Z browser read, was 1.000000 USDC plus 0.008585479 SOL, and that quote expired at 14:44:47Z. A general instruction to continue is not approval. The Solana Spaces quote stays quote-only. Do not start another devnet payment. Executed conversion and delivery remain unproven.
+Refresh the Bitcoin Anchor quote and do not sign it. Spending approval has to name this digital timestamp service, quantity 1, the 1.000000 USDC total, and the SOL cap then on screen. The 15:04Z browser cap was 0.008577266 SOL, below the earlier 0.008585479 SOL comparison, and that quote has expired. Execution is not ready: a lost purchase response cannot be recovered from an unknown certificate id. A general instruction to continue is not approval. Do not start another devnet payment.

@@ -1,11 +1,18 @@
 import type { AppConfig } from "./config";
 import {
+  attemptIdempotencyKey,
   bitcoinAnchorBuyUrl,
   bitcoinAnchorDigest,
+  BITCOIN_ANCHOR_PREIMAGE,
+  compareSolCap,
   conversionInputForMinimum,
   DigitalPurchaseError,
+  EXPECTED_AMOUNT_ATOMIC,
   merchantUsdcAccount,
   parseSolanaExactTerms,
+  PREVIOUS_SOL_CAP_LAMPORTS,
+  REVIEWED_FEE_PAYER,
+  REVIEWED_MERCHANT_RECIPIENT,
   solSpendCap,
   termsAreCurrent,
   usdcGap,
@@ -16,7 +23,7 @@ import {
   parseDisclosedLookupTables,
   validateConversionTransaction,
 } from "./conversion-review";
-import { fetchConversionOrder, DflowRouteError, type DflowQuote } from "./dflow";
+import { fetchConversionOrder, DflowRouteError, QUOTE_FRESHNESS_MS, type DflowQuote } from "./dflow";
 import { formatFixedMinor } from "./money";
 import { DEFAULT_SOL_RESERVE_LAMPORTS, NATIVE_SOL_MINT, USDC_DECIMALS, USDC_MINT, WSOL_MINT } from "./tokens";
 import { isPlausibleAddress, MAINNET_GENESIS_HASH, readSolanaBalances } from "./wallet";
@@ -29,13 +36,30 @@ export interface PreparedDigitalPurchase {
   signing: "unavailable";
   broadcast: "unavailable";
   orderCreated: false;
+  executionReady: false;
+  stages: {
+    quote: "checked";
+    simulation: "not_run";
+    signing: "unavailable";
+    execution: "disabled";
+    delivery: "not_started";
+  };
   terms: SolanaExactTerms;
   termsCurrent: boolean;
+  payload: {
+    preimage: typeof BITCOIN_ANCHOR_PREIMAGE;
+    digest: string;
+    submitted: "The sha256 digest only. The preimage is not sent.";
+    retained: "The store says it keeps the order, the certificate, and the digest. It says it never sees the preimage.";
+    returned: "A signed certificate, a patron number, a badge URL, a verify URL, and a proof URL.";
+    anchoring: "The certificate can arrive while the OpenTimestamps proof is still pending. Bitcoin confirmation is a later upgrade, not the purchase response.";
+  };
   delivery: {
-    method: "The purchase response returns a signed certificate and an OpenTimestamps proof URL.";
-    thailand: "The listing, payment requirements, and rights page name no country restriction and no shipping.";
-    orderRead: "After an authorized payment, read GET https://scvd.store/api/verify/{cert_id}. SuperTab does not write the order.";
-    refund: "Instant delivery is produced before settlement. A paid response with no certificate is a defect: POST https://scvd.store/api/letter, then poll the refund the keeper pays by hand. Nothing here refunds automatically.";
+    method: "Digital timestamp service. Not a shipped product and not a Thailand delivery.";
+    thailand: "No country restriction is named. This test does not prove shipping to Thailand.";
+    orderRead: "A later certificate proves this purchase only when its signed bytes contain bitcoin_anchor, this digest, 1 USDC, the mainnet USDC mint, Solana mainnet, this wallet, and the settlement transaction. Another valid certificate does not.";
+    refund: "The store says a failed instant delivery takes no money. A settled payment with no certificate is a defect handled by hand. Nothing here refunds automatically, and this review does not send a letter.";
+    recovery: "A verify URL needs a certificate id. If the purchase response is lost before that id is kept, this build cannot recover it without the original payment or a wallet signature. Neither will be requested.";
   };
   accounts: {
     buyerUsdc: "present" | "missing" | "not_read";
@@ -43,6 +67,8 @@ export interface PreparedDigitalPurchase {
   };
   wallet: {
     status: "read" | "not_read";
+    address: string | null;
+    network: "solana:mainnet" | null;
     usdcAtomic: string | null;
     usdcDisplay: string | null;
     solLamports: string | null;
@@ -57,6 +83,8 @@ export interface PreparedDigitalPurchase {
     estimatedUsdcDisplay: string | null;
     slippageBps: number | null;
     prioritizationFeeLamports: string | null;
+    quotedAt: string | null;
+    expiresAt: string | null;
     validation: "checked" | "rejected" | "not_prepared";
     detail: string;
   };
@@ -64,11 +92,18 @@ export interface PreparedDigitalPurchase {
     bounded: boolean;
     merchantUsdcAtomic: string;
     merchantUsdcDisplay: string;
-    shopperNetworkFee: "paid by the quoted fee payer";
+    shopperNetworkFee: "paid by the quoted fee payer" | "not the sponsored shape";
     solLamports: string | null;
     solDisplay: string | null;
     reserveLamports: string;
+    previousComparisonLamports: string;
+    exceedsPreviousComparison: boolean;
     unusedUsdc: string;
+  };
+  recovery: {
+    executionReady: false;
+    idempotencyKey: string | null;
+    summary: string;
   };
   readyForApproval: boolean;
   blockers: string[];
@@ -110,6 +145,9 @@ export async function prepareBitcoinAnchorPurchase(input: {
   const merchantUsdc = await tokenAccountExists(deps.config.solanaRpcUrl, merchantAccount, fetchImpl);
   const blockers: string[] = [];
   if (!termsAreCurrent(terms, nowMs)) blockers.push("The merchant quote has expired.");
+  if (terms.amountAtomic !== EXPECTED_AMOUNT_ATOMIC.toString()) blockers.push("The merchant amount is not the reviewed 1.000000 USDC.");
+  if (terms.payTo !== REVIEWED_MERCHANT_RECIPIENT) blockers.push("The merchant recipient changed from the reviewed account.");
+  if (terms.feePayer !== REVIEWED_FEE_PAYER) blockers.push("The payment sponsor changed from the reviewed fee payer.");
   if (!merchantUsdc) blockers.push("The merchant USDC account is missing, so this payment cannot be bounded without an account-creation cost.");
 
   const walletAddress = input.walletAddress?.trim() ?? "";
@@ -133,6 +171,8 @@ export async function prepareBitcoinAnchorPurchase(input: {
   if (!buyerUsdc) blockers.push("This wallet has no mainnet USDC account. Creating one is an extra SOL cost, so the purchase is not bounded.");
   const wallet = {
     status: "read" as const,
+    address: walletAddress,
+    network: "solana:mainnet" as const,
     usdcAtomic: usdc.toString(),
     usdcDisplay: `${formatFixedMinor(usdc, USDC_DECIMALS)} USDC`,
     solLamports: sol.toString(),
@@ -166,6 +206,8 @@ export async function prepareBitcoinAnchorPurchase(input: {
       estimatedUsdcDisplay: null,
       slippageBps: deps.config.dflowSlippageBps,
       prioritizationFeeLamports: null,
+      quotedAt: null,
+      expiresAt: null,
       validation: "not_prepared",
       detail: "Minimum received did not cover the USDC gap inside the SOL reserve. The whole wallet was not quoted.",
     }, null);
@@ -199,12 +241,17 @@ export async function prepareBitcoinAnchorPurchase(input: {
       estimatedUsdcDisplay: null,
       slippageBps: deps.config.dflowSlippageBps,
       prioritizationFeeLamports: null,
+      quotedAt: null,
+      expiresAt: null,
       validation: "not_prepared",
       detail: "The sizing quote covered the gap, but the wallet-bound route was refused. No transaction was signed.",
     }, null);
   }
   if (order.quote.minOutAmount < gap || order.quote.inAmount !== sized.inAmount) {
     blockers.push("The wallet-bound conversion no longer covers the gap at the quoted input.");
+  }
+  if (order.quote.slippageBps !== deps.config.dflowSlippageBps) {
+    blockers.push("The conversion slippage is not the configured slippage. It was not raised to make the quote fit.");
   }
   const validation = inspectOrder(order, walletAddress);
   if (validation.status !== "checked") blockers.push(validation.explanation);
@@ -229,8 +276,10 @@ export async function prepareBitcoinAnchorPurchase(input: {
     estimatedUsdcDisplay: `${formatFixedMinor(order.quote.outAmount, USDC_DECIMALS)} USDC`,
     slippageBps: order.quote.slippageBps,
     prioritizationFeeLamports: priority?.toString() ?? null,
+    quotedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + QUOTE_FRESHNESS_MS).toISOString(),
     validation: validation.status,
-    detail: "Coverage uses minimum received. Estimated output is shown and is not spent against the gap.",
+    detail: "Coverage uses minimum received. The unsigned transaction was checked and discarded, so its blockhash is not part of this review.",
   }, cap && cap.status === "bounded" ? cap.lamports : null);
 }
 
@@ -280,25 +329,49 @@ function finish(
   conversion: PreparedDigitalPurchase["conversion"],
   solLamports: bigint | null,
 ): PreparedDigitalPurchase {
-  const unique = [...new Set(blockers)];
-  const current = termsAreCurrent(terms, nowMs);
   const solCap = conversion.status === "skipped"
     ? (wallet.status === "read" ? 0n : null)
     : solLamports;
+  const comparison = solCap == null ? null : compareSolCap(solCap);
+  if (comparison?.exceedsPrevious) {
+    blockers.push(`The SOL cap is ${formatFixedMinor(solCap ?? 0n, 9)} SOL, above the previous comparison of ${formatFixedMinor(PREVIOUS_SOL_CAP_LAMPORTS, 9)} SOL. The earlier figure is not a spending authorization.`);
+  }
+  const conversionCurrent = !conversion.expiresAt || nowMs < Date.parse(conversion.expiresAt);
+  if (!conversionCurrent) blockers.push("The conversion quote has expired.");
+  const unique = [...new Set(blockers)];
+  const current = termsAreCurrent(terms, nowMs) && conversionCurrent;
   const bounded = unique.length === 0 && current && solCap != null;
+  const sponsored = terms.feePayer !== wallet.address;
   return {
     label: "Prepared digital purchase — not paid",
     execution: "disabled",
     signing: "unavailable",
     broadcast: "unavailable",
     orderCreated: false,
+    executionReady: false,
+    stages: {
+      quote: "checked",
+      simulation: "not_run",
+      signing: "unavailable",
+      execution: "disabled",
+      delivery: "not_started",
+    },
     terms,
     termsCurrent: current,
+    payload: {
+      preimage: BITCOIN_ANCHOR_PREIMAGE,
+      digest: terms.digest,
+      submitted: "The sha256 digest only. The preimage is not sent.",
+      retained: "The store says it keeps the order, the certificate, and the digest. It says it never sees the preimage.",
+      returned: "A signed certificate, a patron number, a badge URL, a verify URL, and a proof URL.",
+      anchoring: "The certificate can arrive while the OpenTimestamps proof is still pending. Bitcoin confirmation is a later upgrade, not the purchase response.",
+    },
     delivery: {
-      method: "The purchase response returns a signed certificate and an OpenTimestamps proof URL.",
-      thailand: "The listing, payment requirements, and rights page name no country restriction and no shipping.",
-      orderRead: "After an authorized payment, read GET https://scvd.store/api/verify/{cert_id}. SuperTab does not write the order.",
-      refund: "Instant delivery is produced before settlement. A paid response with no certificate is a defect: POST https://scvd.store/api/letter, then poll the refund the keeper pays by hand. Nothing here refunds automatically.",
+      method: "Digital timestamp service. Not a shipped product and not a Thailand delivery.",
+      thailand: "No country restriction is named. This test does not prove shipping to Thailand.",
+      orderRead: "A later certificate proves this purchase only when its signed bytes contain bitcoin_anchor, this digest, 1 USDC, the mainnet USDC mint, Solana mainnet, this wallet, and the settlement transaction. Another valid certificate does not.",
+      refund: "The store says a failed instant delivery takes no money. A settled payment with no certificate is a defect handled by hand. Nothing here refunds automatically, and this review does not send a letter.",
+      recovery: "A verify URL needs a certificate id. If the purchase response is lost before that id is kept, this build cannot recover it without the original payment or a wallet signature. Neither will be requested.",
     },
     accounts,
     wallet,
@@ -307,13 +380,20 @@ function finish(
       bounded: bounded && solCap != null,
       merchantUsdcAtomic: terms.amountAtomic,
       merchantUsdcDisplay: terms.amountDisplay,
-      shopperNetworkFee: "paid by the quoted fee payer",
+      shopperNetworkFee: sponsored ? "paid by the quoted fee payer" : "not the sponsored shape",
       solLamports: solCap?.toString() ?? null,
       solDisplay: solCap == null ? null : `${formatFixedMinor(solCap, 9)} SOL`,
       reserveLamports: DEFAULT_SOL_RESERVE_LAMPORTS.toString(),
+      previousComparisonLamports: PREVIOUS_SOL_CAP_LAMPORTS.toString(),
+      exceedsPreviousComparison: comparison?.exceedsPrevious ?? false,
       unusedUsdc: conversion.status === "skipped"
-        ? "No conversion. USDC above the merchant total stays in the wallet."
-        : "Any converted USDC above the merchant total, including output above the minimum received, stays in the wallet.",
+        ? "No conversion. The 1 USDC payment is not added again as SOL. USDC above the merchant total stays in the wallet."
+        : "The SOL cap is the conversion input plus its network fees. The 1 USDC merchant total is what that conversion funds, not a second spend. USDC above that payment stays in the wallet.",
+    },
+    recovery: {
+      executionReady: false,
+      idempotencyKey: wallet.address ? attemptIdempotencyKey({ wallet: wallet.address, digest: terms.digest, quotedAt: terms.quotedAt }) : null,
+      summary: "Execution is unavailable. A lost response cannot be recovered from an unknown certificate id, and this review does not retain a signed payment.",
     },
     readyForApproval: bounded,
     blockers: unique,
@@ -330,13 +410,15 @@ function skippedConversion(detail: string): PreparedDigitalPurchase["conversion"
     estimatedUsdcDisplay: null,
     slippageBps: null,
     prioritizationFeeLamports: null,
+    quotedAt: null,
+    expiresAt: null,
     validation: "not_prepared",
     detail,
   };
 }
 
 function emptyWallet(): PreparedDigitalPurchase["wallet"] {
-  return { status: "not_read", usdcAtomic: null, usdcDisplay: null, solLamports: null, solDisplay: null };
+  return { status: "not_read", address: null, network: null, usdcAtomic: null, usdcDisplay: null, solLamports: null, solDisplay: null };
 }
 
 function inspectOrder(order: Awaited<ReturnType<typeof fetchConversionOrder>>, payer: string): { status: "checked" | "rejected"; explanation: string } {

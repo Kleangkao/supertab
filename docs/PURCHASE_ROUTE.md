@@ -2,7 +2,7 @@
 
 ## October 5: prepared digital purchase, not paid
 
-The physical-store search stays closed. For a digital product of at most 2 USDC, SCVD General Store’s “A Bitcoin Anchor” is the prepared purchase. SuperTab reads the unpaid HTTP 402, checks Solana mainnet USDC, and, when the wallet is short, checks one unsigned SOL-to-USDC conversion sized from minimum received. It does not build the merchant payment transaction, create a checkout session, or write an order. The order proof after a future payment is `GET https://scvd.store/api/verify/{cert_id}`. Paying on the merchant website alone would not prove this path. The verified numbers, the expired quote, and the spending cap are in `docs/PROJECT_STATE.md`. Utilia and a Bitrefill Thailand eSIM were the other two candidates and did not qualify. No mainnet funds moved.
+The physical-store search stays closed. For a digital product of at most 2 USDC, SCVD General Store’s “A Bitcoin Anchor” is the prepared timestamp-service test, not a physical retail or Thailand-shipping proof. SuperTab reads the unpaid HTTP 402 for one public digest, checks Solana mainnet USDC, and, when the selected wallet is short, checks one unsigned SOL-to-USDC conversion sized from minimum received. It does not build the merchant payment, create a checkout session, or write an order. A later certificate counts only when its signed bytes bind this item, digest, amount, mint, network, wallet, and settlement. `GET https://scvd.store/api/verify/{cert_id}` cannot recover an unknown id. The purchase is not execution-ready. The latest expired quote is in `docs/PROJECT_STATE.md`. Utilia and a Bitrefill Thailand eSIM were the other two candidates and did not qualify. No mainnet funds moved.
 
 ## October 5: authorized real-merchant quote only
 

@@ -21,6 +21,15 @@ export const SOLANA_MAINNET_CAIP = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 export const PRODUCT_PRICE_CAP_ATOMIC = 2_000_000n;
 /** One signature on a checked Solana transaction. Not a priority fee. */
 export const SOL_BASE_FEE_LAMPORTS = 5_000n;
+/** This review is for the $1 listing, not any cheaper or dearer quote. */
+export const EXPECTED_AMOUNT_ATOMIC = 1_000_000n;
+/** Last reviewed merchant recipient. A different account is a different payment. */
+export const REVIEWED_MERCHANT_RECIPIENT = "DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE";
+/** Last reviewed sponsor. The shopper does not pay this network fee while this account is the fee payer. */
+export const REVIEWED_FEE_PAYER = "Hc3sdEAsCGQcpgfivywog9uwtk8gUBUZgsxdME1EJy88";
+/** Browser comparison from 2026-10-05T14:39:47Z. Not a spending authorization. */
+export const PREVIOUS_SOL_CAP_LAMPORTS = 8_585_479n;
+export const MAINNET_WALLET_CHAIN = "solana:mainnet";
 
 export class DigitalPurchaseError extends Error {
   constructor(message: string) {
@@ -210,4 +219,126 @@ export function merchantUsdcAccount(owner: string): string {
 
 function ceilBuffer(amount: bigint): bigint {
   return amount + amount / 50n;
+}
+
+export function reviewStillBound(input: {
+  reviewAddress: string | null;
+  reviewNetwork: string | null;
+  currentAddress: string;
+  currentNetwork: string;
+}): boolean {
+  return !!input.reviewAddress
+    && input.reviewAddress === input.currentAddress
+    && input.reviewNetwork === input.currentNetwork
+    && input.currentNetwork === MAINNET_WALLET_CHAIN;
+}
+
+export function compareSolCap(currentLamports: bigint): {
+  previousLamports: string;
+  currentLamports: string;
+  exceedsPrevious: boolean;
+  deltaLamports: string;
+} {
+  const delta = currentLamports - PREVIOUS_SOL_CAP_LAMPORTS;
+  return {
+    previousLamports: PREVIOUS_SOL_CAP_LAMPORTS.toString(),
+    currentLamports: currentLamports.toString(),
+    exceedsPrevious: delta > 0n,
+    deltaLamports: delta.toString(),
+  };
+}
+
+export function attemptIdempotencyKey(input: { wallet: string; digest: string; quotedAt: string }): string {
+  const digest = createHash("sha256").update(`${input.wallet}\n${input.digest}\n${input.quotedAt}`, "utf8").digest("hex");
+  return `st-anchor-${digest.slice(0, 32)}`;
+}
+
+export interface SignedCertificateFields {
+  item?: unknown;
+  digest?: unknown;
+  attests?: { digest?: unknown };
+  paid_usdc?: unknown;
+  paid_atomic?: unknown;
+  asset?: unknown;
+  network?: unknown;
+  payer?: unknown;
+  settlement_tx?: unknown;
+}
+
+/** A valid certificate for some other purchase does not prove this one. */
+export function certificateCorrelates(signed: SignedCertificateFields, expected: {
+  digest: string;
+  payer: string;
+  amountAtomic: string;
+  mint: string;
+  network: string;
+  settlementTx: string | null;
+}): { correlates: boolean; gaps: string[] } {
+  const gaps: string[] = [];
+  const attested = typeof signed.digest === "string" ? signed.digest : signed.attests?.digest;
+  if (signed.item !== BITCOIN_ANCHOR_PRODUCT.productId) gaps.push("The signed item is not bitcoin_anchor.");
+  if (typeof attested !== "string" || attested.toLowerCase() !== expected.digest.toLowerCase()) {
+    gaps.push("The signed bytes do not contain this digest.");
+  }
+  const paidAtomic = typeof signed.paid_atomic === "string" ? signed.paid_atomic : null;
+  const paidUsdc = typeof signed.paid_usdc === "number" || typeof signed.paid_usdc === "string" ? signed.paid_usdc : null;
+  const amountMatches = paidAtomic === expected.amountAtomic
+    || (paidUsdc != null && String(paidUsdc) === "1" && expected.amountAtomic === EXPECTED_AMOUNT_ATOMIC.toString());
+  if (!amountMatches) gaps.push("The signed payment amount is not 1 USDC.");
+  if (signed.asset !== expected.mint) gaps.push("The signed asset is not the mainnet USDC mint.");
+  if (signed.network !== expected.network) gaps.push("The signed network is not Solana mainnet.");
+  if (signed.payer !== expected.payer) gaps.push("The signed payer is not this wallet.");
+  if (expected.settlementTx && signed.settlement_tx !== expected.settlementTx) {
+    gaps.push("The signed settlement transaction is not this payment.");
+  }
+  if (!expected.settlementTx && typeof signed.settlement_tx !== "string") {
+    gaps.push("The signed certificate has no settlement transaction.");
+  }
+  return { correlates: gaps.length === 0, gaps };
+}
+
+export type UncertainOutcome = "confirmation_delayed" | "response_lost" | "certificate_unverified" | "anchor_pending";
+
+export function recoverUncertainPurchase(record: {
+  idempotencyKey: string | null;
+  originalPaymentRetained: boolean;
+  certId: string | null;
+  anchorState: "not_submitted" | "pending" | "bitcoin_confirmed";
+}, outcome: UncertainOutcome): {
+  retryPayment: false;
+  retrySwap: false;
+  executionReady: false;
+  action: string;
+} {
+  const stopped = { retryPayment: false as const, retrySwap: false as const, executionReady: false as const };
+  if (outcome === "confirmation_delayed") {
+    return {
+      ...stopped,
+      action: record.originalPaymentRetained && record.idempotencyKey
+        ? "Wait. The same retained payment and idempotency key can be read again. Do not build another swap or payment."
+        : "Confirmation is delayed and the original payment was not retained. Do not submit another payment.",
+    };
+  }
+  if (outcome === "response_lost") {
+    return {
+      ...stopped,
+      action: record.certId
+        ? "Read only this retained certificate id. Do not pay again."
+        : "The response is gone and no certificate id was retained. Verify-by-id cannot find it, and a wallet-proof claim needs a signature this review will not request. Do not pay again.",
+    };
+  }
+  if (outcome === "certificate_unverified") {
+    return {
+      ...stopped,
+      action: record.certId
+        ? "The certificate id is known, but verification did not succeed. Keep it and do not buy a second anchor."
+        : "There is no certificate id to verify. Do not treat another valid certificate as this purchase.",
+    };
+  }
+  return {
+    ...stopped,
+    action: record.anchorState === "bitcoin_confirmed"
+      ? "Bitcoin confirmation is recorded. No further payment is needed."
+      : "The store can return the certificate while the OpenTimestamps proof is still pending. Pending submission is not a completed Bitcoin anchor. Do not pay again.",
+  };
 }

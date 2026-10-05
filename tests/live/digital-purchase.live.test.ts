@@ -17,8 +17,8 @@ describe.skipIf(!live)("live unpaid digital purchase", () => {
   it("reads a merchant quote and an unsigned conversion without paying", async () => {
     const walletAddress = authorizedAddress();
     const review = await prepareBitcoinAnchorPurchase({ walletAddress }, { config: readConfig() });
-    const serialized = JSON.stringify(review);
-    expect(serialized).not.toContain(walletAddress);
+    expect(review.wallet.address).toBe(walletAddress);
+    expect(review.executionReady).toBe(false);
     expect(review.execution).toBe("disabled");
     expect(review.signing).toBe("unavailable");
     expect(review.broadcast).toBe("unavailable");

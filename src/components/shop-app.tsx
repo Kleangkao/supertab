@@ -27,6 +27,7 @@ export function ShopApp() {
   const [error, setError] = useState<string | null>(null);
   const [walletMode, setWalletMode] = useState<WalletMode>("none");
   const [address, setAddress] = useState("");
+  const [walletChains, setWalletChains] = useState<readonly string[]>([]);
   const [showAddressInput, setShowAddressInput] = useState(false);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   const [walletChoices, setWalletChoices] = useState<StandardWallet[]>([]);
@@ -116,7 +117,7 @@ export function ShopApp() {
     walletOff.current?.(); walletOff.current = null;
     activeWallet.current = null; activeAccount.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false);
     walletEpoch.current++;
-    setWalletMode("none"); setAddress(""); setFundingMint(null);
+    setWalletMode("none"); setAddress(""); setWalletChains([]); setFundingMint(null);
     const current = latestSession.current;
     if (current) {
       latestSession.current = clearWalletReview(current);
@@ -144,6 +145,8 @@ export function ShopApp() {
     const body = await request("/api/purchase", { sessionId: session.sessionId, offerId, quantity: quantity ?? (session.selectedOfferId === offerId ? session.purchase?.checkout.quantity ?? 1 : 1), walletMode: mode, address: nextAddress, fundingMint: mint, signatureAvailable: canSign }, mode === "none" ? "Opening your purchase review…" : "Reading assets & preparing your funding plan…");
     if (body) {
       setWalletMode(mode); setAddress(nextAddress); setFundingMint(mint);
+      if (mode === "address") setWalletChains(["solana:mainnet"]);
+      else if (mode === "sample" || mode === "none") setWalletChains([]);
       setShowAddressInput(!!body.purchase?.balanceError);
     }
   }
@@ -158,7 +161,7 @@ export function ShopApp() {
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
-      activeWallet.current = wallet; activeAccount.current = connected.account; setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
+      activeWallet.current = wallet; activeAccount.current = connected.account; setWalletChains(connected.account.chains ?? []); setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
       setDevnetCheck(null); setCanSignDevnet(supportsDevnetSigning(wallet, connected.address, connected.account));
       walletOff.current?.();
       const epoch = walletEpoch.current;
@@ -291,8 +294,13 @@ export function ShopApp() {
           {!session && <p className="hero-copy">Tell us what you’re looking for. SuperTab finds real products and helps you plan how to fund them with your Solana assets.</p>}
         </header>
         {session ? <PrototypePaths compact /> : <PrototypePaths />}
-        <DigitalPurchase suggestedAddress={purchase?.walletKind === "sample" ? "" : (purchase?.walletAddress ?? DEMO_ADDRESS)} />
-        <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : purchase?.walletAddress ?? "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : purchase?.walletAddress ?? ""} />
+        <DigitalPurchase
+          key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}`}
+          address={purchase?.walletKind === "sample" ? "" : address}
+          network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : "solana:mainnet"}
+          onUseReadOnly={() => { setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
+        />
+        <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />
         <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
         {!session && <div className="wallet-control"><p className="section-copy">Connect a wallet and sign a control message before you shop. This approves no purchase and moves no funds.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
           {walletChallenge && !walletSigned && <><pre className="wallet-message">{walletChallenge.message}</pre><button className="secondary" disabled={!!busy} onClick={() => void checkWalletControl(true)}>Sign wallet control message</button></>}
