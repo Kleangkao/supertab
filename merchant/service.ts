@@ -10,6 +10,24 @@ import { verifyTransfer, type ChainTransaction } from "./verify";
 
 export const MERCHANT_SEPARATION = "This owner-controlled devnet merchant proves the integration. It does not prove that another retailer accepts Solana.";
 
+export function postedProduct() {
+  return {
+    id: TEST_PRODUCT.id,
+    name: TEST_PRODUCT.name,
+    label: TEST_PRODUCT.label,
+    quantity: TEST_PRODUCT.quantity,
+    itemMinor: TEST_PRODUCT.itemMinor.toString(),
+    shippingMinor: TEST_PRODUCT.shippingMinor.toString(),
+    taxMinor: TEST_PRODUCT.taxMinor.toString(),
+    totalMinor: postedTotal().toString(),
+    mint: CIRCLE_SOLANA_DEVNET_USDC_MINT,
+    mintIssuer: "Circle" as const,
+    decimals: DEVNET_USDC_DECIMALS,
+    network: "solana:devnet" as const,
+    separation: MERCHANT_SEPARATION,
+  };
+}
+
 export interface CheckoutResponse {
   id: string;
   productId: string;
@@ -83,8 +101,7 @@ export class DevnetMerchant {
       now: input.now,
     });
     const built = paymentFor({ ...checkout, amount: checkout.totalMinor, memo: checkout.id, blockhash });
-    checkout.transaction = transactionBase64(built.transaction);
-    return presentCheckout(checkout);
+    return presentCheckout(this.store.noteTransaction(checkout.id, transactionBase64(built.transaction)));
   }
 
   confirm(checkoutId: string, signature: string, now: number): Promise<ConfirmResult> {
@@ -147,12 +164,16 @@ export class DevnetMerchant {
     const checkout = this.store.checkouts.get(checkoutId);
     if (!checkout) throw new Error("Checkout not found.");
     const prior = this.store.payments.get(signature);
-    if (prior?.orderId) {
-      const order = this.store.orders.get(prior.orderId);
-      if (!order || order.checkoutId !== checkoutId) throw new Error("This signature already fulfilled another checkout.");
-      return { kind: "order", order: presentOrder(order) };
+    if (prior) {
+      if (prior.checkoutId !== checkoutId) throw new Error("This signature already belongs to another checkout.");
+      if (prior.orderId) {
+        const order = this.store.orders.get(prior.orderId);
+        if (!order || order.checkoutId !== checkoutId) throw new Error("This signature already belongs to another checkout.");
+        return { kind: "order", order: presentOrder(order) };
+      }
+      if (prior.status === "validated") return { kind: "payment_recorded" };
+      return { kind: "unapplied", reason: prior.reason ?? "rejected" };
     }
-    if (prior?.status === "validated") return { kind: "payment_recorded" };
     if (checkout.orderId) return this.rememberUnapplied(checkout, signature, "already_fulfilled");
     const tx = await this.fetchTransaction(signature);
     if (!tx) return { kind: "pending" };

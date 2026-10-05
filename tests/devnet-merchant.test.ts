@@ -1,11 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { encodeBase58, requirePubkey } from "../merchant/base58";
 import { listen } from "../merchant/http";
 import { generateSolanaKey } from "../merchant/keys";
 import { CHECKOUT_TTL_MS, CIRCLE_SOLANA_DEVNET_USDC_MINT, DEVNET_USDC_DECIMALS, LATE_PAYMENT_WINDOW_MS, TEST_PRODUCT, TEST_TOTAL_MINOR } from "../merchant/product";
 import { DevnetMerchant } from "../merchant/service";
-import { MerchantStore } from "../merchant/store";
+import { MerchantStore, openDurableStore } from "../merchant/store";
 import { buildPaymentTransaction, signTransaction } from "../merchant/transaction";
 import type { ChainTransaction } from "../merchant/verify";
 import { readDevnetOrder, requestDevnetCheckout, submitDevnetSignature } from "../src/lib/devnet-merchant-client";
@@ -16,6 +19,7 @@ const closers: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (closers.length > 0) await closers.pop()!();
+  while (files.length > 0) rmSync(files.pop()!, { force: true });
 });
 
 describe("owner-controlled devnet merchant", () => {
@@ -145,7 +149,83 @@ describe("owner-controlled devnet merchant", () => {
     expect(order).toMatchObject({ checkoutId: checkout.id, paymentSignature: signature, totalMinor: TEST_TOTAL_MINOR.toString(), mint: CIRCLE_SOLANA_DEVNET_USDC_MINT, separation: expect.stringContaining("does not prove") });
     expect(TEST_PRODUCT.label).toContain("not a product from another retailer");
   });
+
+  it("reloads the same order and refund, and refuses to reuse the payment", async () => {
+    const file = temporaryStore();
+    const fixture = harness();
+    const durable = openDurableStore(file);
+    const merchant = merchantFor(fixture, durable);
+    const checkout = await merchant.createCheckout({ buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1, now: 1_000 });
+    const signature = sig();
+    fixture.chain.set(signature, transfer(fixture, checkout.reference));
+    const paid = await merchant.confirm(checkout.id, signature, 1_000);
+    if (paid.kind !== "order") throw new Error("expected order");
+    const stored = durable.checkouts.get(checkout.id)!;
+    const refund = sig();
+    fixture.chain.set(refund, refundTransfer(fixture, stored.refundReference));
+    expect((await merchant.refund(paid.order.id, refund)).status).toBe("refunded");
+
+    const restarted = merchantFor(fixture, openDurableStore(file));
+    const order = restarted.getOrder(paid.order.id);
+    expect(order).toMatchObject({ id: paid.order.id, status: "refunded", refundSignature: refund, paymentSignature: signature });
+    expect(await restarted.confirm(checkout.id, signature, 9_000)).toEqual({ kind: "order", order });
+    const other = await restarted.createCheckout({ buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1, now: 2_000 });
+    await expect(restarted.confirm(other.id, signature, 2_000)).rejects.toThrow(/another checkout/);
+    expect(restarted.getOrder(paid.order.id)?.id).toBe(paid.order.id);
+    expect(restarted.recover()).toEqual([]);
+  });
+
+  it("recovers one order after a restart when the order write failed", async () => {
+    const file = temporaryStore();
+    const fixture = harness();
+    const durable = openDurableStore(file);
+    durable.failOrderWrites = 1;
+    const merchant = merchantFor(fixture, durable);
+    const checkout = await merchant.createCheckout({ buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1, now: 1_000 });
+    const signature = sig();
+    fixture.chain.set(signature, transfer(fixture, checkout.reference));
+    expect(await merchant.confirm(checkout.id, signature, 1_000)).toEqual({ kind: "payment_recorded" });
+
+    const restarted = merchantFor(fixture, openDurableStore(file));
+    expect(restarted.getOrder("missing")).toBeNull();
+    const [order] = restarted.recover();
+    expect(order?.paymentSignature).toBe(signature);
+    const again = merchantFor(fixture, openDurableStore(file));
+    expect(again.recover()).toEqual([]);
+    expect(await again.confirm(checkout.id, signature, 1_000)).toEqual({ kind: "order", order });
+  });
+
+  it("lets SuperTab read one order again after the merchant process restarts", async () => {
+    const file = temporaryStore();
+    const fixture = harness();
+    const first = await listen(merchantFor(fixture, openDurableStore(file)));
+    const checkout = await requestDevnetCheckout(first.url, { buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1 });
+    const signature = sig();
+    fixture.chain.set(signature, transfer(fixture, checkout.reference));
+    const submitted = await submitDevnetSignature(first.url, checkout.id, signature) as { status: number; body: { order: { id: string } } };
+    expect(submitted.status).toBe(200);
+    await first.close();
+    const second = await listen(merchantFor(fixture, openDurableStore(file)));
+    closers.push(second.close);
+    const order = await readDevnetOrder(second.url, submitted.body.order.id);
+    expect(order).toMatchObject({ id: submitted.body.order.id, paymentSignature: signature, status: "paid", separation: expect.stringContaining("does not prove") });
+    const replay = await submitDevnetSignature(second.url, checkout.id, signature) as { status: number; body: { order: { id: string } } };
+    expect(replay.status).toBe(200);
+    expect(replay.body.order.id).toBe(order?.id);
+  });
 });
+
+const files: string[] = [];
+
+function temporaryStore(): string {
+  const file = join(tmpdir(), `supertab-merchant-${randomBytes(4).toString("hex")}.json`);
+  files.push(file);
+  return file;
+}
+
+function merchantFor(fixture: ReturnType<typeof harness>, store: MerchantStore): DevnetMerchant {
+  return new DevnetMerchant(store, fixture.recipient.address, fixture.destination.address, async (signature) => fixture.chain.get(signature) ?? null, async () => blockhash);
+}
 
 function harness() {
   const store = new MerchantStore();

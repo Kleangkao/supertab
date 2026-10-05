@@ -13,3 +13,22 @@ export function decodeBase58(value: string): Uint8Array | null {
   for (const char of value) { if (char !== "1") break; zeros++; }
   return Uint8Array.from([...new Array<number>(zeros).fill(0), ...body]);
 }
+
+export function encodeBase58(bytes: Uint8Array): string {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
+  const digits = [0];
+  for (let index = zeros; index < bytes.length; index += 1) {
+    let carry = bytes[index]!;
+    for (let digitIndex = 0; digitIndex < digits.length; digitIndex += 1) {
+      carry += digits[digitIndex]! << 8;
+      digits[digitIndex] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  return `${"1".repeat(zeros)}${digits.reverse().map((digit) => ALPHABET[digit]).join("")}`;
+}

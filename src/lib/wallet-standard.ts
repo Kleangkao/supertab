@@ -89,6 +89,25 @@ export async function signDevnetCheck(wallet: StandardWallet, check: DevnetSigni
   return btoa(String.fromCharCode(...outputs[0].signedTransaction));
 }
 
+/** Signs one prepared legacy devnet payment. This does not send it. */
+export async function signDevnetTransfer(wallet: StandardWallet, address: string, transactionBase64: string, account?: StandardWalletAccount): Promise<string> {
+  if (!supportsDevnetSigning(wallet, address, account)) throw new Error("This wallet account does not support legacy devnet signing.");
+  const transaction = Uint8Array.from(atob(transactionBase64), (char) => char.charCodeAt(0));
+  if (transaction[0] !== 1) throw new Error("The checkout transaction does not have one signer.");
+  const resolved = signingAccount(wallet, address, account)!;
+  const feature = wallet.features["solana:signTransaction"] as { signTransaction: (input: {
+    account: StandardWalletAccount; transaction: Uint8Array; chain: typeof DEVNET_CHAIN;
+  }) => Promise<{ signedTransaction: Uint8Array }[]> };
+  const outputs = await feature.signTransaction({ account: resolved, transaction, chain: DEVNET_CHAIN });
+  const signed = outputs[0]?.signedTransaction;
+  if (outputs.length !== 1 || !(signed instanceof Uint8Array) || signed.length !== transaction.length
+    || signed.subarray(65).some((byte, index) => byte !== transaction[index + 65])
+    || signed.subarray(1, 65).every((byte) => byte === 0)) {
+    throw new Error("The wallet did not sign the exact devnet payment.");
+  }
+  return btoa(String.fromCharCode(...signed));
+}
+
 /** Explicit nonfinancial signing only; never sign or broadcast a transaction. */
 export async function signWalletMessage(wallet: StandardWallet, address: string, message: string, account?: StandardWalletAccount): Promise<string> {
   const resolved = signingAccount(wallet, address, account);

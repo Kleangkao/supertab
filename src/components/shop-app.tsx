@@ -279,7 +279,7 @@ export function ShopApp() {
   }, [checkoutExpired, busy, session?.sessionId, purchase?.termsId]);
 
   return <main className="app-shell">
-    <nav className="topbar" aria-label="Main navigation"><Link className="wordmark" href="/" aria-label="SuperTab home"><span className="brand-icon">s<span>↗</span></span>SuperTab<span className="beta">DEMO</span></Link><span className="demo-note"><span className="status-dot" />Explore freely. Money stays put.</span></nav>
+    <nav className="topbar" aria-label="Main navigation"><Link className="wordmark" href="/" aria-label="SuperTab home"><span className="brand-icon">s<span>↗</span></span>SuperTab<span className="beta">DEMO</span></Link><Link href="/devnet">Devnet test product</Link><span className="demo-note"><span className="status-dot" />Explore freely. Money stays put.</span></nav>
     <div className={`workspace ${purchase ? "has-review" : ""}`}>
       <section className="shopping">
         <header className={`hero ${session ? "compact" : ""}`}>

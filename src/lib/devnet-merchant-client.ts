@@ -1,11 +1,21 @@
 export interface DevnetCheckout {
   id: string;
   productId: string;
+  productName: string;
+  label: string;
+  quantity: number;
+  itemMinor: string;
+  shippingMinor: string;
+  taxMinor: string;
   totalMinor: string;
   mint: string;
   mintIssuer: "Circle";
+  decimals: number;
+  network: "solana:devnet";
+  buyer: string;
   recipient: string;
   reference: string;
+  expiresAt: string;
   transaction: string;
   separation: string;
 }

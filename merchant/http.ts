@@ -1,12 +1,18 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ConfirmResult, DevnetMerchant } from "./service";
+import { postedProduct, type ConfirmResult, type DevnetMerchant } from "./service";
 
-export async function listen(merchant: DevnetMerchant): Promise<{ url: string; close: () => Promise<void> }> {
+export async function listen(merchant: DevnetMerchant, port = 0): Promise<{ url: string; close: () => Promise<void> }> {
   const server = createServer((request, response) => {
     void handle(merchant, request, response);
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
   const address = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${address.port}`,
@@ -17,6 +23,10 @@ export async function listen(merchant: DevnetMerchant): Promise<{ url: string; c
 async function handle(merchant: DevnetMerchant, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (request.method === "GET" && url.pathname === "/product") {
+      send(response, 200, postedProduct());
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/checkouts") {
       const body = await readJson(request);
       const checkout = await merchant.createCheckout({
