@@ -115,3 +115,16 @@ On October 5, 2026, `npx vitest run` passed 152 tests and skipped 7. With `SUPER
 ## Next action
 
 Refresh the Bitcoin Anchor quote and do not sign it. Spending approval has to name this digital timestamp service, quantity 1, the 1.000000 USDC total, and the SOL cap then on screen. The 15:04Z browser cap was 0.008577266 SOL, below the earlier 0.008585479 SOL comparison, and that quote has expired. Execution is not ready: a lost purchase response cannot be recovered from an unknown certificate id. A general instruction to continue is not approval. Do not start another devnet payment.
+
+
+## Recovery preparation — October 6, 2026
+
+Wallet connection no longer requests a control challenge. It sets the connected account for quote review only; an optional control-message review and signature are separate explicit actions. The home screen now renders the wallet picker before a shopping session exists. Connection does not establish cryptographic control proof or spending approval.
+
+The quote route journals the original merchant resource, idempotency key, wallet, and reviewed terms for connected-source reviews. Local server custody uses AES-256-GCM in ignored `data/purchase-recovery/`, with a separate random key in ignored `merchant/secrets/purchase-recovery.key`. The browser still stores only non-authorization attempt metadata. Never copy the key or journal into Git. Windows users must keep the workspace private; POSIX file modes do not establish Windows ACL protection. This local filesystem design is not suitable for an ephemeral deployment.
+
+The server journal can retain an original payment authorization and mark an attempt outcome unknown before a future submission. These methods are fixture-tested only and have no HTTP execution endpoint or sender. They are not called by the quote UI. No payment authorization was created or stored in this work. Existing attempts cannot be replaced, corrupt/wrong-key storage fails closed, and restart preserves the encrypted original. An interrupted write can leave a lock requiring deliberate recovery; it never silently opens a second attempt.
+
+Verified: 167 tests passed, 7 skipped; changed-file lint, TypeScript, and production build passed. Browser inspection confirmed connection wording and disabled claim/payment controls. This browser has no installed shopper wallet, so actual extension connection remains unverified. No claim, swap, payment, or new devnet checkout was requested.
+
+Remaining work before mainnet execution: bind the future validated payment builder and explicit approval to the journal; retain its exact authorization before submission; implement only the documented same-payment recovery or explicit wallet-message claim. Refreshing a quote is not authorization. Original merchant request custody now exists, but neither live recovery nor executed conversion is proven. The product/USDC amount and fresh SOL cap still require owner approval.

@@ -115,7 +115,7 @@ export function ShopApp() {
 
   function invalidateWallet() {
     walletOff.current?.(); walletOff.current = null;
-    activeWallet.current = null; activeAccount.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false);
+    activeWallet.current = null; activeAccount.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false); setWalletSigned(false); walletDesk.current = null;
     walletEpoch.current++;
     setWalletMode("none"); setAddress(""); setWalletChains([]); setFundingMint(null);
     const current = latestSession.current;
@@ -156,11 +156,12 @@ export function ShopApp() {
     const wallets = discoverStandardWallets(window);
     if (!chosen && wallets.length > 1) { setWalletChoices([...wallets]); return; }
     const wallet = chosen ?? wallets[0];
-    if (!wallet) { setError("No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect and sign the control message. That signature approves no purchase and moves no funds."); return; }
+    if (!wallet) { setError("No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect. Connecting requests no message or transaction signature."); return; }
     setWalletChoices([]);
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
+      walletDesk.current = null; setWalletSigned(false);
       activeWallet.current = wallet; activeAccount.current = connected.account; setWalletChains(connected.account.chains ?? []); setWalletChallenge(null); setCanSignMessage(supportsWalletMessage(wallet));
       setDevnetCheck(null); setCanSignDevnet(supportsDevnetSigning(wallet, connected.address, connected.account));
       walletOff.current?.();
@@ -170,14 +171,10 @@ export function ShopApp() {
       if (epoch !== walletEpoch.current) return;
       if (session?.selectedOfferId) await selectOffer(session.selectedOfferId, "connected", connected.address, null, connected.canRequestSignature);
       else {
-        const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "start", address: connected.address }), signal: AbortSignal.timeout(12_000) });
-        const started = await response.json() as { sessionId: string; termsId: string; challenge: WalletChallenge; error?: string };
-        if (!response.ok) throw new Error(started.error ?? "Could not prepare the wallet check.");
-        walletDesk.current = { sessionId: started.sessionId, termsId: started.termsId, address: connected.address };
+        walletDesk.current = null;
+        setWalletSigned(false);
         setAddress(connected.address);
         setWalletMode("connected");
-        setWalletChallenge(started.challenge);
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
     finally { lock.current = false; setBusy(null); flushWalletReset(); }
@@ -187,10 +184,21 @@ export function ShopApp() {
     const current = latestSession.current;
     const wallet = activeWallet.current;
     const desk = walletDesk.current;
-    if (lock.current || !wallet || !(current?.purchase?.walletAddress || desk)) return;
+    if (lock.current || !wallet || !activeAccount.current) return;
     const epoch = walletEpoch.current;
     lock.current = true; setError(null); setBusy(sign ? "Waiting for your wallet’s message signature…" : "Preparing a wallet control check…");
     try {
+      if (!current?.purchase && !desk && !sign) {
+        const response = await fetch("/api/wallet/control", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "start", address: activeAccount.current.address }), signal: AbortSignal.timeout(12_000) });
+        const started = await response.json() as { sessionId: string; termsId: string; challenge: WalletChallenge; error?: string };
+        if (!response.ok) throw new Error(started.error ?? "Could not prepare the wallet check.");
+        if (epoch !== walletEpoch.current) return;
+        walletDesk.current = { sessionId: started.sessionId, termsId: started.termsId, address: activeAccount.current.address };
+        setWalletChallenge(started.challenge);
+        return;
+      }
+      if (!current?.purchase && !desk) return;
       const terms = current?.purchase
         ? { sessionId: current.sessionId, termsId: current.purchase.termsId }
         : { sessionId: desk!.sessionId, termsId: desk!.termsId };
@@ -297,13 +305,15 @@ export function ShopApp() {
         <DigitalPurchase
           key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}:${walletMode}`}
           address={purchase?.walletKind === "sample" ? "" : address}
-          network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : "solana:mainnet"}
-          walletSource={!address || purchase?.walletKind === "sample" || (walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet")) ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
-          onUseReadOnly={() => { setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
+          network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : walletChains.includes("solana:mainnet") ? "solana:mainnet" : ""}
+          walletSource={!address || purchase?.walletKind === "sample" || !walletChains.includes("solana:mainnet") ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
+          onUseReadOnly={() => { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; walletDesk.current = null; walletEpoch.current++; setWalletSigned(false); setWalletChallenge(null); setCanSignMessage(false); setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
         />
         <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />
         <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
-        {!session && <div className="wallet-control"><p className="section-copy">Connect a wallet and sign a control message before you shop. This approves no purchase and moves no funds.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
+        {!session && <div className="wallet-control"><p className="section-copy">Connect to review your wallet and quotes. Connection requests no signature and approves no payment. Wallet control proof is optional and separate.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
+          {walletMode === "connected" && <><p>Connected wallet: {address}. Control proof {walletSigned ? "verified" : "not requested"}.</p>{!walletChallenge && !walletSigned && <button className="secondary" disabled={!!busy || !canSignMessage} onClick={() => void checkWalletControl()}>Review optional wallet control message</button>}</>}
+          {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
           {walletChallenge && !walletSigned && <><pre className="wallet-message">{walletChallenge.message}</pre><button className="secondary" disabled={!!busy} onClick={() => void checkWalletControl(true)}>Sign wallet control message</button></>}
         </div>}
         {!session && <div className="suggestions"><span>Try a little inspiration</span>{["Find me a black polo under $50.", "Find me running shoes under $120."].map(prompt => <button key={prompt} disabled={!!busy} onClick={() => setDraft(prompt)}>{prompt.replace("Find me ", "").replace(".", "")} <span aria-hidden="true">↗</span></button>)}</div>}

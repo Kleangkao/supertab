@@ -62,3 +62,10 @@ Historical shopping and simulated-card rehearsal below. Use the prototype script
 ## Remaining submission work
 
 Capture final mobile/desktop screenshots and a video after the integrated checkout milestone is resolved. Deployment requires an approved destination. The existing private GitHub repository is accessible on this PC. Do not publish this app or its environment configuration to a replacement public destination.
+
+
+## October 6 connection and recovery update
+
+Connect wallet now requests only wallet connection. The optional control-message review is a separate button; do not click its signature action during a quote-only demonstration. A browser without the shopper extension cannot prove actual connected-wallet behavior. Read-only demo wallets remain exploration only.
+
+Connected quote requests retain their original merchant request and review privately on the local server. Authorization custody is encrypted and tested with fixtures, but no real authorization or execution endpoint exists. Claim signing remains disabled. Do not describe this as a completed mainnet purchase or live recovery test.
