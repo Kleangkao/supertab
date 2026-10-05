@@ -69,3 +69,8 @@ Capture final mobile/desktop screenshots and a video after the integrated checko
 Connect wallet now requests only wallet connection. The optional control-message review is a separate button; do not click its signature action during a quote-only demonstration. A browser without the shopper extension cannot prove actual connected-wallet behavior. Read-only demo wallets remain exploration only.
 
 Connected quote requests retain their original merchant request and review privately on the local server. Authorization custody is encrypted and tested with fixtures, but no real authorization or execution endpoint exists. Claim signing remains disabled. Do not describe this as a completed mainnet purchase or live recovery test.
+
+
+## Connection-only Phantom check
+
+Open http://localhost:3000 in the browser with Phantom installed. Click Connect wallet and approve sharing the public address. Do not select the optional control-message signature. Confirm the Timestamp service panel shows the intended connected wallet and mainnet, then click Refresh unpaid quote. The merchant preview is unsigned, stored privately, and has no execution control. Read-only demo exploration does not build a merchant payment preview. Sponsor acceptance remains unverified.

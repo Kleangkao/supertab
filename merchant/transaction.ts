@@ -201,7 +201,7 @@ export function transactionBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
 }
 
-function compile(input: { blockhash: string; accounts: AccountMeta[]; instructions: Instruction[] }): BuiltTransaction {
+export function compile(input: { blockhash: string; accounts: AccountMeta[]; instructions: Instruction[] }): BuiltTransaction {
   const ordered = [
     ...input.accounts.filter((account) => account.signer && account.writable),
     ...input.accounts.filter((account) => account.signer && !account.writable),

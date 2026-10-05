@@ -64,6 +64,7 @@ export interface SolanaExactTerms {
   amountDisplay: string;
   payTo: string;
   feePayer: string;
+  memo?: string;
   shopperPaysNetworkFee: false;
   quotedAt: string;
   expiresAt: string;
@@ -125,6 +126,10 @@ export function parseSolanaExactTerms(
   }
   const feePayer = (extra as { feePayer?: unknown }).feePayer;
   const quotedAt = (extra as { quotedAt?: unknown }).quotedAt;
+  const memo = (extra as { memo?: unknown }).memo;
+  if (memo !== undefined && (typeof memo !== "string" || !memo.length || new TextEncoder().encode(memo).length > 256)) {
+    throw new DigitalPurchaseError("The merchant payment memo is invalid.");
+  }
   if (typeof feePayer !== "string" || !isPlausibleAddress(feePayer)) {
     throw new DigitalPurchaseError("The Solana fee payer is not a Solana address.");
   }
@@ -154,6 +159,7 @@ export function parseSolanaExactTerms(
     amountDisplay: `${formatFixedMinor(amount, USDC_DECIMALS)} USDC`,
     payTo: accept.payTo,
     feePayer,
+    ...(typeof memo === "string" ? { memo } : {}),
     shopperPaysNetworkFee: false,
     quotedAt,
     expiresAt: new Date(quotedAtMs + accept.maxTimeoutSeconds * 1000).toISOString(),

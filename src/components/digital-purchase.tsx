@@ -154,6 +154,7 @@ export function DigitalPurchase({
       <div className="detail-row"><span>SOL reserve</span><strong>0.010000000 SOL kept back</strong></div>
       <div className="detail-row"><span>Spending review</span><strong>{visible.wallet.source === "connected" && visible.readyForApproval && !expired && !unresolved ? "Spending review only. Not an approval to pay." : "Not an approval package"}</strong></div>
       <div className="detail-row"><span>Execution</span><strong>Unavailable</strong></div>
+      {visible.paymentPreview && <div role="status"><strong>Merchant payment preview: unsigned</strong><p>{visible.paymentPreview.detail}</p></div>}
       <p>{visible.spend.unusedUsdc}</p>
       <p>{visible.payload.retained} {visible.payload.returned}</p>
       <p>{visible.delivery.orderRead}</p>

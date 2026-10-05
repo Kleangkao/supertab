@@ -10,6 +10,7 @@ export interface OriginalPurchaseRequest {
   requestUrl: string;
   requestBody: string;
   reviewedTerms: string;
+  unsignedPayment?: string;
   createdAt: string;
 }
 interface JournalRecord extends OriginalPurchaseRequest {
@@ -57,6 +58,13 @@ export class PurchaseJournal {
       if (record.state !== "prepared" || record.paymentAuthorization !== null) throw new Error("Cannot replace the original payment authorization.");
       if (!authorization || authorization.length > 100_000) throw new Error("Invalid payment authorization.");
       return { ...record, state: "authorization_retained", paymentAuthorization: authorization };
+    });
+  }
+  refreshUnsignedReview(id: string, reviewedTerms: string, unsignedPayment: string): void {
+    this.update(() => {
+      const record = this.match(id);
+      if (record.state !== "prepared" || record.paymentAuthorization) throw new Error("Cannot refresh a submitted or authorized attempt.");
+      return { ...record, reviewedTerms, unsignedPayment };
     });
   }
   markSubmitted(id: string): void {

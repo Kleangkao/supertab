@@ -18,7 +18,10 @@ it("persists original request before submission and keeps authorization encrypte
   const { path, key, terms, journal } = fixture();
   journal.prepare(terms);
   expect(journal.read()?.state).toBe("prepared");
+  journal.refreshUnsignedReview(terms.id, "fresh-terms", "unsigned-fixture");
+  expect(journal.read()?.unsignedPayment).toBe("unsigned-fixture");
   journal.retainAuthorization(terms.id, "fixture-payment-authorization");
+  expect(() => journal.refreshUnsignedReview(terms.id, "new-terms", "replacement")).toThrow(/refresh/);
   journal.markSubmitted(terms.id);
   const reopened = new PurchaseJournal(path, key);
   expect(reopened.read()?.state).toBe("outcome_unknown");

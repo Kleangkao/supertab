@@ -128,3 +128,16 @@ The server journal can retain an original payment authorization and mark an atte
 Verified: 167 tests passed, 7 skipped; changed-file lint, TypeScript, and production build passed. Browser inspection confirmed connection wording and disabled claim/payment controls. This browser has no installed shopper wallet, so actual extension connection remains unverified. No claim, swap, payment, or new devnet checkout was requested.
 
 Remaining work before mainnet execution: bind the future validated payment builder and explicit approval to the journal; retain its exact authorization before submission; implement only the documented same-payment recovery or explicit wallet-message claim. Refreshing a quote is not authorization. Original merchant request custody now exists, but neither live recovery nor executed conversion is proven. The product/USDC amount and fresh SOL cap still require owner approval.
+
+
+## Unsigned sponsored-payment preview — October 6, 2026
+
+The connected-source timestamp quote route now builds a version-0, no-lookup-table USDC payment preview and retains it in the encrypted journal. Its two signatures remain zero: sponsor slot 0, shopper slot 1. It contains bounded compute-budget instructions, one exact 1 USDC TransferChecked to the merchant ATA, and a merchant-supplied memo or an attempt-specific uniqueness memo. The sponsor is never an instruction account. Source and destination ATAs are derived from mainnet USDC.
+
+A fresh quote can update unsigned review/transaction data only while the journal remains prepared and has no payment authorization. It cannot overwrite an authorized or submitted attempt. Transaction bytes are not returned to the browser, and no signing, payment submission, or recovery-replay endpoint was added. Zero requested priority price and 20,000 compute units are a preview policy, not proof that the sponsor accepts this transaction. Read-only exploration does not build or persist this payment preview.
+
+Reference: https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_svm.md (read October 6). The specification separates valid payment outcomes from sponsor acceptance. The preview is not simulated, sponsor-approved, signed, sent, or funded by an executed conversion. Actual USDC balances must be rechecked after any future approved conversion.
+
+Verification: 169 tests passed, 7 skipped; TypeScript and production build passed. Builder fixtures inspect wire-format signer slots, exact transfer, ATA derivation, sponsor isolation, memo, and rejection of stale/altered terms. Browser inspection confirmed quote-only controls and disabled claim signing. The real Phantom connection and connected-source live preview have not yet been exercised. No funds moved.
+
+Next human check: in Edge with Phantom installed, open http://localhost:3000 (not /devnet), connect the intended wallet, confirm its public address in Timestamp service — quote only, and select Refresh unpaid quote. Approve connection only, not a message or transaction. The page should show the unsigned preview or a specific quote error; report which. A payment still requires later exact spending approval.

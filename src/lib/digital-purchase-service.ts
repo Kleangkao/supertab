@@ -31,6 +31,15 @@ import { isPlausibleAddress, MAINNET_GENESIS_HASH, readSolanaBalances } from "./
 const PROBE_LAMPORTS = 10_000_000n;
 
 export interface PreparedDigitalPurchase {
+  paymentPreview?: {
+    status: "built_unsigned";
+    version: "v0";
+    signatureSlots: 2;
+    signaturesPresent: 0;
+    memo: string;
+    lastValidBlockHeight: number;
+    detail: string;
+  };
   label: "Prepared digital purchase — not paid";
   execution: "disabled";
   signing: "unavailable";
