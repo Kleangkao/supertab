@@ -1,5 +1,6 @@
 import type { ChainRpc } from "./execute";
 import { transactionBlockhash } from "../src/lib/payment-message";
+import { encodeBase58 } from "../src/lib/base58";
 
 /** Public devnet endpoint. Shopping's SOLANA_RPC_URL is mainnet and is never read here. */
 export const DEVNET_RPC = "https://api.devnet.solana.com";
@@ -84,7 +85,17 @@ export async function sendSigned(transaction: Uint8Array, fetchImpl: typeof fetc
   await ensureDevnetEndpoint(fetchImpl);
   const validity = await rpc<{ value: boolean }>("isBlockhashValid", [transactionBlockhash(transaction), { commitment: "confirmed" }], fetchImpl);
   if (validity.value !== true) throw new Error("Payment blockhash expired or is unavailable. Cancel the review, request a fresh checkout, and sign again. No payment was sent.");
-  return rpc<string>("sendTransaction", [Buffer.from(transaction).toString("base64"), { encoding: "base64", preflightCommitment: "confirmed" }], fetchImpl);
+  try {
+    return await rpc<string>("sendTransaction", [Buffer.from(transaction).toString("base64"), { encoding: "base64", preflightCommitment: "confirmed" }], fetchImpl);
+  } catch (error) {
+    if (!(error instanceof Error) || !/already been processed|already processed/i.test(error.message)) throw error;
+    const signature = encodeBase58(transaction.subarray(1, 65));
+    const status = await rpc<{ value: ({ err: unknown; confirmationStatus: string } | null)[] }>(
+      "getSignatureStatuses", [[signature], { searchTransactionHistory: true }], fetchImpl);
+    const existing = status.value[0];
+    if (existing && existing.err === null && ["confirmed", "finalized"].includes(existing.confirmationStatus)) return signature;
+    throw new Error("This signature was already submitted but confirmation is pending. Ask the merchant about this signature; do not create another payment.");
+  }
 }
 
 export async function confirmedTransaction(signature: string, fetchImpl: typeof fetch = fetch): Promise<unknown | null> {

@@ -3,7 +3,7 @@ import { DevnetPurchase } from "@/components/devnet-purchase";
 
 export const metadata: Metadata = {
   title: "Devnet test product · SuperTab",
-  description: "Review and pay for the owner-controlled devnet test marker.",
+  description: "Read the verified owner-controlled devnet order, or pay the test marker from a devnet wallet.",
 };
 
 export default function DevnetPage() {

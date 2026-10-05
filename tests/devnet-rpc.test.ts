@@ -24,6 +24,26 @@ it("refuses an expired blockhash before broadcast", async () => {
 const RPC_ENV = ["SOLANA_RPC_URL", "SOLANA_DEVNET_RPC_URL"] as const;
 const SAVED_RPC_ENV = Object.fromEntries(RPC_ENV.map((key) => [key, process.env[key]]));
 
+it("reconciles an already processed payment only after successful confirmation", async () => {
+  resetDevnetEndpointCheck();
+  const key = () => generateSolanaKey().address;
+  const transaction = buildPaymentTransaction({ buyer: key(), sourceTokenAccount: key(), destinationTokenAccount: key(),
+    mint: CIRCLE_SOLANA_DEVNET_USDC_MINT, reference: key(), amount: 1_000_000n, decimals: 6,
+    memo: "checkout", blockhash: key() }).transaction;
+  transaction[1] = 1;
+  let confirmed = true;
+  const fetcher: typeof fetch = async (_url, init) => {
+    const method = JSON.parse(String(init?.body)).method;
+    if (method === "getGenesisHash") return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (method === "isBlockhashValid") return Response.json({ result: { value: true } });
+    if (method === "sendTransaction") return Response.json({ error: { message: "Transaction simulation failed: This transaction has already been processed" } });
+    return Response.json({ result: { value: [confirmed ? { err: null, confirmationStatus: "finalized" } : null] } });
+  };
+  expect(await sendSigned(transaction, fetcher)).toBeTruthy();
+  confirmed = false;
+  await expect(sendSigned(transaction, fetcher)).rejects.toThrow(/confirmation is pending/);
+});
+
 afterEach(() => {
   vi.useRealTimers();
   for (const key of RPC_ENV) {

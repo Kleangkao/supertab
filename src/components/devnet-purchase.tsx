@@ -25,6 +25,8 @@ type ConfirmResult =
   | { kind: "payment_recorded" }
   | { kind: "unapplied"; reason: string };
 
+const VERIFIED_DEMO_ORDER_ID = "e485b032-7abd-4a59-849c-f37775ec57c6";
+
 export function DevnetPurchase() {
   const [product, setProduct] = useState<PostedProduct | null>(null);
   const [productError, setProductError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function DevnetPurchase() {
   const [signedTransaction, setSignedTransaction] = useState<string | null>(null);
   const [order, setOrder] = useState<DevnetMerchantOrder | null>(null);
   const [merchantNote, setMerchantNote] = useState<string | null>(null);
-  const [orderId, setOrderId] = useState("");
+  const [orderId, setOrderId] = useState(VERIFIED_DEMO_ORDER_ID);
   const [refundTransaction, setRefundTransaction] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [devnetCapable, setDevnetCapable] = useState(false);
@@ -143,6 +145,7 @@ export function DevnetPurchase() {
 
   async function send() {
     if (!checkout || !signedTransaction) return;
+    if (order?.checkoutId === checkout.id) return;
     if (block) { setSignedTransaction(null); setError(block); return; }
     const signature = signedPaymentSignature(signedTransaction);
     if (!signature) { setError("The signed payment has no signature."); return; }
@@ -284,7 +287,23 @@ export function DevnetPurchase() {
         <p>{product.separation}</p>
         <p>Network {product.network} · Circle devnet USDC · mint {product.mint}</p>
         <p>Quantity {product.quantity} · Item {usdc(product.itemMinor)} · Shipping {usdc(product.shippingMinor)} · Tax {usdc(product.taxMinor)} · Total {usdc(product.totalMinor)}</p>
+        <p>The USDC total is the merchant price. Devnet SOL pays the network base fee separately. A wallet may add a priority fee up to 0.0001 devnet SOL. That fee does not change the USDC total.</p>
       </div>}
+      <ol aria-label="Devnet purchase steps">
+        <li>Connect Phantom on Solana devnet.</li>
+        <li>Review the merchant total.</li>
+        <li>Approve that exact total.</li>
+        <li>Sign in Phantom.</li>
+        <li>Send the signed payment.</li>
+        <li>Read the merchant order.</li>
+        <li>Refund only to return that payment.</li>
+      </ol>
+      <form className="address-form" onSubmit={event => void readOrder(event)}>
+        <p>The verified demo order is already paid and refunded. Read it here. A new checkout is a separate 1.000000 USDC payment and is not required.</p>
+        <label htmlFor="merchant-order-id">Merchant order id</label>
+        <input id="merchant-order-id" value={orderId} onChange={event => setOrderId(event.target.value)} maxLength={80} disabled={!!busy} placeholder="Order id from the merchant" />
+        <button className="secondary" disabled={!!busy || !orderId.trim()}>Read merchant order</button>
+      </form>
       <div className="wallet-actions">
         <button className="secondary" disabled={!!busy} onClick={() => void connect()}>{address ? "Reconnect wallet" : "Connect wallet"}</button>
         {address && <button className="secondary" disabled={!!busy} onClick={disconnect}>Disconnect</button>}
@@ -292,7 +311,8 @@ export function DevnetPurchase() {
       {wallets.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{wallets.map((item, index) => <button key={index} disabled={!!busy} onClick={() => void connect(item)}>Connect {item.name}</button>)}</div>}
       {address && <p className="mono">{address}</p>}
       {address && !devnetCapable && <div className="notice warning" role="status">This wallet account is not on Solana devnet. No payment was requested.</div>}
-      <p>Connect Phantom on Solana devnet before Review. After Review, approve, sign, and send within 60 seconds. The checkout expires with its blockhash.</p>
+      <p><strong>New test checkout</strong></p>
+      <p>Use this only for another payment. Connect Phantom on Solana devnet before Review. After Review, approve, sign, and send within 60 seconds. The checkout expires with its blockhash.</p>
       <div className="wallet-actions">
         <button className="primary" disabled={!!busy || !address} onClick={() => void review()}>Review merchant checkout</button>
         {checkout && <button className="secondary" disabled={!!busy} onClick={clearReview}>Cancel review</button>}
@@ -311,11 +331,12 @@ export function DevnetPurchase() {
         <button className="secondary" disabled={!!busy || approvedId === checkout.id} onClick={() => setApprovedId(checkout.id)}>
           {approvedId === checkout.id ? "Purchase approved" : `Approve this purchase · ${usdc(checkout.totalMinor)}`}
         </button>
-        <p>{approvedId === checkout.id ? "Approval covers only this checkout. It has not signed or sent a transaction." : "Approval is required before the wallet is asked to sign."}</p>
-        <button className="primary" disabled={!!busy || !!block} onClick={() => void sign()}>Sign devnet payment</button>
+        <p>{order?.checkoutId === checkout.id ? "This checkout already has a merchant order. Do not send the payment again." : approvedId === checkout.id ? "Approval covers only this checkout. It has not signed or sent a transaction." : "Approval is required before the wallet is asked to sign."}</p>
+        <button className="primary" disabled={!!busy || !!block || order?.checkoutId === checkout.id} onClick={() => void sign()}>Sign devnet payment</button>
         {block && <p>{block}</p>}
-        {signedTransaction && <>
-          <p>The wallet signed this payment. It is still on this device.</p>
+        {signedTransaction && order?.checkoutId !== checkout.id && <p>The wallet signed this payment. It is still on this device and has not been sent.</p>}
+        {signedTransaction && order?.checkoutId === checkout.id && <p>{order.status === "refunded" ? "The merchant confirmed the payment and the refund. Neither remains only on this device." : "The merchant confirmed this payment. It is no longer only on this device."}</p>}
+        {signedTransaction && order?.checkoutId !== checkout.id && <>
           <button className="primary" disabled={!!busy || !!block} onClick={() => void send()}>Send signed payment on devnet</button>
           <button className="secondary" disabled={!!busy || !signedPaymentSignature(signedTransaction)} onClick={() => void submit(signedPaymentSignature(signedTransaction) ?? "")}>Ask the merchant about this signature</button>
         </>}
@@ -332,11 +353,6 @@ export function DevnetPurchase() {
       </section>}
       {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}</div>}
       {error && <div className="notice warning" role="alert">{error}</div>}
-      <form className="address-form" onSubmit={event => void readOrder(event)}>
-        <label htmlFor="merchant-order-id">Merchant order id</label>
-        <input id="merchant-order-id" value={orderId} onChange={event => setOrderId(event.target.value)} maxLength={80} disabled={!!busy} placeholder="Order id from the merchant" />
-        <button className="secondary" disabled={!!busy || !orderId.trim()}>Read merchant order</button>
-      </form>
     </section>
   </main>;
 }

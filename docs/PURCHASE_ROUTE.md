@@ -173,4 +173,14 @@ A devnet `getAccountInfo` for `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` ret
 
 ## Not implemented
 
-No Crossmint, Bitrefill, Coinbase, or VoltVault client was added. No retailer order exists. Another devnet purchase is not the next step.
+No Crossmint, Bitrefill, Coinbase, or VoltVault client was added. No retailer order exists.
+
+## Verified devnet shopper flow — October 5, 2026
+
+The owner used Phantom through `/devnet` for one controlled purchase and its refund. Order `e485b032-7abd-4a59-849c-f37775ec57c6` is refunded. Payment `5AJyuMPZAMt2MxQUhFjG67NhSdkGJTgZZKzxVBT37BBtrJF8YHpU6N4ocmmbPKCF1RsLia88JnSYGwV6xQg2bcAB` at slot 507680455 sent 1000000 minor Circle devnet USDC to the local merchant. Refund `2HzsTS3LUESsmDiBaAjptqykiPi5cbeVLMQVqa9qs3FT1cXfuFPN31QkPCxbhUGTTGe8jHUCBtgRaWRZdeY9r1Kj` at slot 507680500 returned that amount. After a merchant restart, SuperTab read the same order, both signatures, and status `refunded`. This is not a retailer purchase.
+
+Orders `ab0421c2-e708-40cd-b30c-a1e2a433b512` and `3518beef-1b53-4e5c-8682-0baca6b1c3fa` stay paid. Each still holds 1.000000 devnet USDC at the merchant. They were left that way on purpose.
+
+## Next retailer access
+
+Solana Spaces remains the strongest evidenced existing-store route. Its checkout can quote shipping after a full address, accepts Phantom, spends mainnet USDC, and returns its own order id after `signTransaction`. The missing piece is authorization to execute, not a missing payment mechanism. Do not add that integration, spend mainnet funds, or contact the store until the owner authorizes the purchase and supplies the address. Details are in `docs/PROJECT_STATE.md`.
