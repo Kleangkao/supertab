@@ -141,3 +141,12 @@ Reference: https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact
 Verification: 169 tests passed, 7 skipped; TypeScript and production build passed. Builder fixtures inspect wire-format signer slots, exact transfer, ATA derivation, sponsor isolation, memo, and rejection of stale/altered terms. Browser inspection confirmed quote-only controls and disabled claim signing. The real Phantom connection and connected-source live preview have not yet been exercised. No funds moved.
 
 Next human check: in Edge with Phantom installed, open http://localhost:3000 (not /devnet), connect the intended wallet, confirm its public address in Timestamp service — quote only, and select Refresh unpaid quote. Approve connection only, not a message or transaction. The page should show the unsigned preview or a specific quote error; report which. A payment still requires later exact spending approval.
+
+
+## Blocked quote regression fixed — October 6, 2026
+
+The owner connected Phantom and shared a screenshot showing wallet control verified, followed by a generic quote error. A read-only reproduction separated the service quote, journal, blockhash, and preview steps. The preview failed because that quote's sponsor differed from the previously reviewed sponsor. Price, mint, recipient, network, and resource matched. The route incorrectly attempted a preview despite the service's explicit blocker.
+
+The quote route and browser now prepare/persist a new payment review only when readyForApproval is true. A blocked quote remains visible with its specific reasons, without preparing a payment or replacing recovery custody. An actual-route regression failed with HTTP 502 before the fix and passed afterward. A subsequent unpaid live request returned readyForApproval true, no blockers, an unsigned preview, and execution disabled. This does not prove sponsorship or execution; earlier reads did show a changed sponsor, so fresh terms remain necessary.
+
+170 tests passed, 7 skipped; changed-file lint, TypeScript, and production build passed. No signature, swap, payment, or claim was requested. Refresh unpaid quote in the owner's connected browser to see either the unsigned preview or the specific blocker.

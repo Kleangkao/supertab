@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const review = await prepareBitcoinAnchorPurchase({ walletAddress, walletSource }, { config: readConfig() });
     // This client declaration is review identity, not authenticated spending authority.
     // No payment authorization is created, and no executable journal is returned.
-    if (walletSource === "connected" && review.wallet.address && review.recovery.idempotencyKey) {
+    if (walletSource === "connected" && review.readyForApproval && review.wallet.address && review.recovery.idempotencyKey) {
       const id = review.recovery.idempotencyKey;
       const journal = localPurchaseJournal(id);
       const stored = journal.read();

@@ -79,7 +79,7 @@ export function DigitalPurchase({
         throw new Error("The quote was not bound to this wallet connection.");
       }
       setRecoveryNote(null);
-      if (walletSource === "connected" && body.recovery.idempotencyKey && body.wallet.address) {
+      if (walletSource === "connected" && body.readyForApproval && body.recovery.idempotencyKey && body.wallet.address) {
         const prepared = createPreparedAttempt({
           id: body.recovery.idempotencyKey,
           walletSource: "connected",
