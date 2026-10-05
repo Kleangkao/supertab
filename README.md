@@ -76,8 +76,9 @@ Open http://localhost:3000.
 | --- | --- |
 | `GEMINI_API_KEY` | Gemini shopping understanding. Without it, SuperTab uses a deterministic parser. |
 | `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` | eBay listing search. |
-| `SOLANA_RPC_URL` | Optional. Blank uses public mainnet. |
-| `SOLANA_CLUSTER` | Shopping funding uses mainnet. The RPC genesis hash must match mainnet even if configuration labels it otherwise. Devnet signing diagnostics use their own fixed endpoint. |
+| `SOLANA_RPC_URL` | Optional. Blank uses public mainnet. Devnet checkout does not read this variable. |
+| `SOLANA_CLUSTER` | Shopping funding uses mainnet. The RPC genesis hash must match mainnet even if configuration labels it otherwise. |
+| `SOLANA_DEVNET_RPC_URL` | Optional HTTPS devnet endpoint for the owner-controlled checkout. Blank uses public devnet. The merchant verifies the genesis hash and refuses mainnet or testnet. |
 | `DFLOW_QUOTE_BASE_URL` | Defaults to the DFlow dev quote API, which does not need a key. |
 | `DFLOW_API_KEY` | Only if you point quotes at a key-gated DFlow host. |
 | `SHOPIFY_CATALOG_ENABLED` | Shopify discovery is on by default and needs no secret. |

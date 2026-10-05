@@ -51,6 +51,17 @@ async function handle(merchant: DevnetMerchant, request: IncomingMessage, respon
       send(response, found ? 200 : 404, found ?? { error: "Order not found." });
       return;
     }
+    const prepareRefund = url.pathname.match(/^\/orders\/([^/]+)\/refund-transaction$/);
+    if (request.method === "POST" && prepareRefund) {
+      send(response, 200, await merchant.prepareRefund(decodeURIComponent(prepareRefund[1]!)));
+      return;
+    }
+    const submitRefund = url.pathname.match(/^\/orders\/([^/]+)\/refund-submit$/);
+    if (request.method === "POST" && submitRefund) {
+      const body = await readJson(request);
+      send(response, 200, await merchant.submitSignedRefund(decodeURIComponent(submitRefund[1]!), signedTransactionField(body)));
+      return;
+    }
     const refund = url.pathname.match(/^\/orders\/([^/]+)\/refund$/);
     if (request.method === "POST" && refund) {
       const body = await readJson(request);
@@ -82,6 +93,15 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+function signedTransactionField(body: unknown): string {
+  if (!body || typeof body !== "object" || !("signedTransaction" in body)) throw new Error("Missing signed transaction.");
+  const value = (body as { signedTransaction?: unknown }).signedTransaction;
+  if (typeof value !== "string" || value.length < 80 || value.length > 1800 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error("Invalid signed transaction.");
+  }
+  return value;
 }
 
 function stringField(body: unknown, key: string): string {

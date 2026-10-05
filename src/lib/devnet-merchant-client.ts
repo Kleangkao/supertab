@@ -24,6 +24,7 @@ export interface DevnetMerchantOrder {
   id: string;
   checkoutId: string;
   productId: string;
+  buyer: string;
   totalMinor: string;
   mint: string;
   paymentSignature: string;
@@ -44,7 +45,17 @@ export async function requestDevnetCheckout(baseUrl: string, input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (response.status !== 201) throw new Error("The devnet merchant did not open a checkout.");
+  if (response.status !== 201) {
+    const failure = await response.json().catch(() => null) as { error?: unknown } | null;
+    const message = typeof failure?.error === "string" ? failure.error : "";
+    if (/rate limit|too many requests|429/i.test(message)) {
+      throw new Error("Solana devnet is rate limiting checkout requests. No payment was sent. Wait a minute, then review again. A dedicated devnet endpoint belongs in SOLANA_DEVNET_RPC_URL. Mainnet SOLANA_RPC_URL is not used.");
+    }
+    if (/returned Solana mainnet|returned Solana testnet|not Solana devnet/i.test(message)) {
+      throw new Error("Devnet checkout refused the RPC because it is not Solana devnet. No payment was sent.");
+    }
+    throw new Error("The devnet merchant did not open a checkout.");
+  }
   return response.json() as Promise<DevnetCheckout>;
 }
 

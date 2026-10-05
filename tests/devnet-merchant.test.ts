@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { encodeBase58, requirePubkey } from "../merchant/base58";
 import { listen } from "../merchant/http";
-import { generateSolanaKey } from "../merchant/keys";
+import { generateSolanaKey, signBytes } from "../merchant/keys";
 import { CHECKOUT_TTL_MS, CIRCLE_SOLANA_DEVNET_USDC_MINT, DEVNET_USDC_DECIMALS, LATE_PAYMENT_WINDOW_MS, TEST_PRODUCT, TEST_TOTAL_MINOR } from "../merchant/product";
 import { DevnetMerchant } from "../merchant/service";
 import { MerchantStore, openDurableStore } from "../merchant/store";
@@ -111,6 +111,42 @@ describe("owner-controlled devnet merchant", () => {
     fixture.chain.set(refund, refundTransfer(fixture, stored.refundReference));
     expect((await fixture.merchant.refund(paid.order.id, refund)).status).toBe("refunded");
     expect((await fixture.merchant.refund(paid.order.id, refund)).refundSignature).toBe(refund);
+  });
+
+  it("co-signs a buyer-signed v0 refund once and refuses a changed refund without sending", async () => {
+    const fixture = harness();
+    const sent: Uint8Array[] = [];
+    const merchant = new DevnetMerchant(fixture.store, fixture.recipient.address, fixture.destination.address, async (signature) => fixture.chain.get(signature) ?? null, async () => blockhash, {
+      merchant: fixture.recipient,
+      async send(transaction) {
+        sent.push(transaction);
+        const signature = sig();
+        const stored = fixture.store.checkouts.values().next().value;
+        fixture.chain.set(signature, refundTransfer(fixture, stored!.refundReference));
+        return signature;
+      },
+    });
+    const checkout = await merchant.createCheckout({ buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1, now: 1_000 });
+    const payment = sig();
+    fixture.chain.set(payment, transfer(fixture, checkout.reference));
+    const paid = await merchant.confirm(checkout.id, payment, 1_000);
+    if (paid.kind !== "order") throw new Error("expected order");
+    const prepared = await merchant.prepareRefund(paid.order.id);
+    const changed = Buffer.from(prepared.transaction, "base64");
+    changed[changed.length - 1] ^= 1;
+    await expect(merchant.submitSignedRefund(paid.order.id, changed.toString("base64"))).rejects.toThrow(/changed the refund/);
+    expect(sent).toHaveLength(0);
+
+    const versioned = versionedRefund(Buffer.from(prepared.transaction, "base64"));
+    const message = versioned.subarray(1 + versioned[0]! * 64);
+    versioned.set(signBytes(fixture.buyer, message), 1);
+    const refunded = await merchant.submitSignedRefund(paid.order.id, Buffer.from(versioned).toString("base64"));
+    expect(refunded).toMatchObject({ id: paid.order.id, status: "refunded" });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.[0]).toBe(2);
+    expect(await merchant.submitSignedRefund(paid.order.id, Buffer.from(versioned).toString("base64"))).toMatchObject({ id: paid.order.id, status: "refunded" });
+    expect(sent).toHaveLength(1);
+    await expect(merchant.prepareRefund(paid.order.id)).rejects.toThrow(/paid order/);
   });
 
   it("builds a buyer-approved devnet USDC transaction for the checkout reference", async () => {
@@ -267,4 +303,9 @@ function balances(fixture: ReturnType<typeof harness>, reference: string, source
 
 function sig(): string {
   return encodeBase58(randomBytes(64));
+}
+
+function versionedRefund(legacy: Uint8Array): Uint8Array {
+  const messageAt = 1 + legacy[0]! * 64;
+  return Uint8Array.from([...legacy.subarray(0, messageAt), 128, ...legacy.subarray(messageAt), 0]);
 }

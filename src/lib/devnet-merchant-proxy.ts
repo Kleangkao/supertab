@@ -51,6 +51,21 @@ export async function proxyRecover(): Promise<Response> {
   return proxy("/recover", { method: "POST" });
 }
 
+export async function proxyPrepareRefund(orderId: string): Promise<Response> {
+  return proxy(`/orders/${encodeURIComponent(orderId)}/refund-transaction`, { method: "POST" });
+}
+
+export async function proxySubmitRefund(orderId: string, signedTransaction: string): Promise<Response> {
+  if (signedTransaction.length < 80 || signedTransaction.length > 1800 || !/^[A-Za-z0-9+/]+={0,2}$/.test(signedTransaction)) {
+    return Response.json({ error: "Invalid signed transaction." }, { status: 400 });
+  }
+  return proxy(`/orders/${encodeURIComponent(orderId)}/refund-submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ signedTransaction }),
+  }, 45_000);
+}
+
 export async function proxyBroadcast(signedTransaction: string): Promise<Response> {
   const raw = bytesFromBase64(signedTransaction);
   if (!raw || raw[0] !== 1 || raw.length < 66) {
@@ -64,9 +79,9 @@ export async function proxyBroadcast(signedTransaction: string): Promise<Respons
   }
 }
 
-async function proxy(path: string, init?: RequestInit): Promise<Response> {
+async function proxy(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<Response> {
   try {
-    const response = await fetch(new URL(path, merchantBaseUrl()), { ...init, cache: "no-store", signal: AbortSignal.timeout(20_000) });
+    const response = await fetch(new URL(path, merchantBaseUrl()), { ...init, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
     return Response.json(await response.json() as unknown, { status: response.status });
   } catch (error) {
     return merchantError(error, "The local devnet merchant is not running.");

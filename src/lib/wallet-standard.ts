@@ -1,4 +1,5 @@
 import { checkMemoBytes, DEVNET_CHAIN, type DevnetSigningCheck } from "./devnet-memo";
+import { describePaymentMismatch, samePaymentMessage } from "./payment-message";
 
 export interface StandardWalletAccount {
   address: string;
@@ -93,17 +94,28 @@ export async function signDevnetCheck(wallet: StandardWallet, check: DevnetSigni
 export async function signDevnetTransfer(wallet: StandardWallet, address: string, transactionBase64: string, account?: StandardWalletAccount): Promise<string> {
   if (!supportsDevnetSigning(wallet, address, account)) throw new Error("This wallet account does not support legacy devnet signing.");
   const transaction = Uint8Array.from(atob(transactionBase64), (char) => char.charCodeAt(0));
-  if (transaction[0] !== 1) throw new Error("The checkout transaction does not have one signer.");
+  const signers = transaction[0] ?? 0;
+  if (signers < 1 || signers > 2) throw new Error("The checkout transaction does not have one or two signers.");
+  const messageAt = 1 + signers * 64;
   const resolved = signingAccount(wallet, address, account)!;
   const feature = wallet.features["solana:signTransaction"] as { signTransaction: (input: {
     account: StandardWalletAccount; transaction: Uint8Array; chain: typeof DEVNET_CHAIN;
   }) => Promise<{ signedTransaction: Uint8Array }[]> };
   const outputs = await feature.signTransaction({ account: resolved, transaction, chain: DEVNET_CHAIN });
-  const signed = outputs[0]?.signedTransaction;
-  if (outputs.length !== 1 || !(signed instanceof Uint8Array) || signed.length !== transaction.length
-    || signed.subarray(65).some((byte, index) => byte !== transaction[index + 65])
-    || signed.subarray(1, 65).every((byte) => byte === 0)) {
-    throw new Error("The wallet did not sign the exact devnet payment.");
+  const returned = outputs[0]?.signedTransaction;
+  // Extension responses can originate in another realm, where instanceof fails.
+  if (outputs.length !== 1 || !ArrayBuffer.isView(returned)
+    || Object.prototype.toString.call(returned) !== "[object Uint8Array]") {
+    throw new Error("The wallet returned an unsupported signing response. No payment was sent.");
+  }
+  const signed = Uint8Array.from(returned);
+  const exact = signed.length === transaction.length && signed[0] === signers
+    && signed.subarray(messageAt).every((byte, index) => byte === transaction[messageAt + index]);
+  if (!exact && !samePaymentMessage(transaction, signed)) {
+    throw new Error(`The wallet changed the payment message (${describePaymentMismatch(transaction, signed)}). No payment was sent. Extra instructions or changed payment terms are not accepted.`);
+  }
+  if (signed.subarray(1, 65).every((byte) => byte === 0)) {
+    throw new Error("The wallet returned an unsigned payment. No payment was sent.");
   }
   return btoa(String.fromCharCode(...signed));
 }

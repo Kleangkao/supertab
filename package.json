@@ -12,7 +12,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
-    "merchant": "node scripts/devnet-merchant.mjs"
+    "merchant": "node --env-file=.env.local scripts/devnet-merchant.mjs"
   },
   "dependencies": {
     "next": "16.3.8",

@@ -34,6 +34,7 @@ export function DevnetPurchase() {
   const [order, setOrder] = useState<DevnetMerchantOrder | null>(null);
   const [merchantNote, setMerchantNote] = useState<string | null>(null);
   const [orderId, setOrderId] = useState("");
+  const [refundTransaction, setRefundTransaction] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [devnetCapable, setDevnetCapable] = useState(false);
   const [wallets, setWallets] = useState<StandardWallet[]>([]);
@@ -119,6 +120,7 @@ export function DevnetPurchase() {
       setApprovedId(null);
       setSignedTransaction(null);
       setOrder(null);
+      setRefundTransaction(null);
       setMerchantNote(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The devnet merchant did not open a checkout.");
@@ -211,6 +213,43 @@ export function DevnetPurchase() {
     } finally { setBusy(null); }
   }
 
+  async function prepareRefund() {
+    if (!order || order.status !== "paid") return;
+    setBusy("Asking the merchant to prepare the refund…");
+    setError(null);
+    try {
+      const response = await fetch("/api/devnet-merchant/refund-transaction", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: order.id }),
+      });
+      const body = await response.json() as { transaction?: string; totalMinor?: string; error?: string };
+      if (!response.ok || !body.transaction || !body.totalMinor) throw new Error(body.error ?? "The merchant did not prepare a refund.");
+      setRefundTransaction(body.transaction);
+      setMerchantNote(`Refund prepared for ${usdc(body.totalMinor)} back to the buyer. It has not been signed or sent.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The merchant did not prepare a refund.");
+    } finally { setBusy(null); }
+  }
+
+  async function signRefund() {
+    if (!order || !refundTransaction || !wallet.current || !address) return;
+    setBusy("Waiting for your wallet to sign this devnet refund…");
+    setError(null);
+    try {
+      const signed = await signDevnetTransfer(wallet.current, address, refundTransaction, account.current ?? undefined);
+      setBusy("Sending the signed refund on devnet…");
+      const response = await fetch("/api/devnet-merchant/refund-submit", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: order.id, signedTransaction: signed }),
+      });
+      const body = await response.json() as DevnetMerchantOrder & { error?: string };
+      if (!response.ok || body.status !== "refunded") throw new Error(body.error ?? "The refund was not confirmed.");
+      setOrder(body);
+      setRefundTransaction(null);
+      setMerchantNote("The merchant confirmed the refund after the return transfer.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The refund was not confirmed.");
+    } finally { setBusy(null); }
+  }
+
   function showMerchant(body: { kind?: ConfirmResult["kind"]; order?: DevnetMerchantOrder; reason?: string; error?: string }) {
     if (body.kind === "order" && body.order) {
       setOrder(body.order);
@@ -231,7 +270,7 @@ export function DevnetPurchase() {
     </nav>
     <section className="workspace">
       <header className="hero compact">
-        <p className="eyebrow">Owner-controlled devnet test</p>
+        <p className="eyebrow">DEVNET · owner-controlled</p>
         <h1>Devnet test marker</h1>
         <p className="hero-copy">{product?.label ?? "This page buys one labeled test marker from the local merchant. It is not a product from another retailer."}</p>
       </header>
@@ -258,6 +297,9 @@ export function DevnetPurchase() {
         <p>Quantity {checkout.quantity} · Item {usdc(checkout.itemMinor)} · Shipping {usdc(checkout.shippingMinor)} · Tax {usdc(checkout.taxMinor)}</p>
         <p className="checkout-total">Total {usdc(checkout.totalMinor)} · {checkout.network} · Circle devnet USDC</p>
         <p>Buyer {checkout.buyer}</p>
+        <p>Merchant recipient {checkout.recipient}</p>
+        <p>Payment reference {checkout.reference}</p>
+        <p>Mint {checkout.mint}</p>
         <p>Expires {checkout.expiresAt}</p>
         <button className="secondary" disabled={!!busy || approvedId === checkout.id} onClick={() => setApprovedId(checkout.id)}>
           {approvedId === checkout.id ? "Purchase approved" : `Approve this purchase · ${usdc(checkout.totalMinor)}`}
@@ -274,6 +316,12 @@ export function DevnetPurchase() {
       </section>}
       {merchantNote && <div className="notice subtle" role="status">{merchantNote}</div>}
       {order && <OrderDetails order={order} />}
+      {order?.status === "paid" && <section className="notice subtle" aria-label="Devnet refund">
+        <strong>Refund this devnet payment</strong>
+        <p>Return {usdc(order.totalMinor)} Circle devnet USDC from the owner-controlled merchant to the buyer. This is not a retailer return.</p>
+        <button className="secondary" disabled={!!busy} onClick={() => void prepareRefund()}>Prepare refund</button>
+        <button className="primary" disabled={!!busy || !refundTransaction || !address} onClick={() => void signRefund()}>Sign and send refund</button>
+      </section>}
       {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}</div>}
       {error && <div className="notice warning" role="alert">{error}</div>}
       <form className="address-form" onSubmit={event => void readOrder(event)}>

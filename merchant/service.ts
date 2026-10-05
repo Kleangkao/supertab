@@ -5,7 +5,9 @@ import {
   TEST_PRODUCT,
 } from "./product";
 import { assertProductQuantity, MerchantStore, postedTotal, settlementFor, type CheckoutRecord, type OrderRecord } from "./store";
-import { buildPaymentTransaction, transactionBase64, type BuiltTransaction } from "./transaction";
+import type { SolanaKey } from "./keys";
+import { addSignerSignature, buildPaymentTransaction, buildRefundTransaction, transactionBase64, type BuiltTransaction } from "./transaction";
+import { samePaymentMessage } from "../src/lib/payment-message";
 import { verifyTransfer, type ChainTransaction } from "./verify";
 
 export const MERCHANT_SEPARATION = "This owner-controlled devnet merchant proves the integration. It does not prove that another retailer accepts Solana.";
@@ -73,8 +75,24 @@ export interface OrderResponse {
   separation: string;
 }
 
+export interface RefundRelay {
+  merchant: SolanaKey;
+  send(transaction: Uint8Array): Promise<string>;
+}
+
+export interface PreparedRefund {
+  orderId: string;
+  transaction: string;
+  totalMinor: string;
+  mint: string;
+  network: "solana:devnet";
+  buyer: string;
+  recipient: string;
+}
+
 export class DevnetMerchant {
   private readonly pending = new Map<string, Promise<ConfirmResult>>();
+  private readonly preparedRefunds = new Map<string, { transaction: Uint8Array; signature: string | null }>();
 
   constructor(
     private readonly store: MerchantStore,
@@ -82,6 +100,7 @@ export class DevnetMerchant {
     readonly destinationTokenAccount: string,
     private readonly fetchTransaction: (signature: string) => Promise<ChainTransaction | null>,
     private readonly blockhash: () => Promise<string>,
+    private readonly refundRelay?: RefundRelay,
   ) {}
 
   async createCheckout(input: { buyer: string; sourceTokenAccount: string; quantity: number; now: number }): Promise<CheckoutResponse> {
@@ -111,6 +130,49 @@ export class DevnetMerchant {
     const work = this.confirmOnce(checkoutId, signature, now).finally(() => this.pending.delete(key));
     this.pending.set(key, work);
     return work;
+  }
+
+  async prepareRefund(orderId: string): Promise<PreparedRefund> {
+    const order = this.store.orders.get(orderId);
+    const checkout = order ? this.store.checkouts.get(order.checkoutId) : undefined;
+    if (!order || !checkout || order.status !== "paid") throw new Error("Only a paid order can be refunded.");
+    if (this.preparedRefunds.get(orderId)?.signature) throw new Error("This refund was already submitted.");
+    const transaction = buildRefundTransaction({
+      feePayer: checkout.buyer,
+      merchant: checkout.recipient,
+      sourceTokenAccount: checkout.destinationTokenAccount,
+      destinationTokenAccount: checkout.sourceTokenAccount,
+      mint: CIRCLE_SOLANA_DEVNET_USDC_MINT,
+      reference: checkout.refundReference,
+      amount: order.totalMinor,
+      decimals: DEVNET_USDC_DECIMALS,
+      memo: order.id,
+      blockhash: await this.blockhash(),
+    }).transaction;
+    this.preparedRefunds.set(orderId, { transaction, signature: null });
+    return {
+      orderId,
+      transaction: transactionBase64(transaction),
+      totalMinor: order.totalMinor.toString(),
+      mint: CIRCLE_SOLANA_DEVNET_USDC_MINT,
+      network: "solana:devnet",
+      buyer: checkout.buyer,
+      recipient: checkout.recipient,
+    };
+  }
+
+  async submitSignedRefund(orderId: string, signedTransaction: string): Promise<OrderResponse> {
+    const prepared = this.preparedRefunds.get(orderId);
+    const relay = this.refundRelay;
+    if (!prepared || !relay) throw new Error("Prepare the refund again.");
+    if (prepared.signature) return this.finishRefund(orderId, prepared.signature);
+    const signed = Buffer.from(signedTransaction, "base64");
+    if (!samePaymentMessage(prepared.transaction, signed)) throw new Error("The wallet changed the refund. No refund was sent.");
+    if (signed.subarray(1, 65).every((byte) => byte === 0)) throw new Error("The buyer has not signed this refund.");
+    const full = addSignerSignature(signed, relay.merchant, 1);
+    const signature = await relay.send(full);
+    prepared.signature = signature;
+    return this.finishRefund(orderId, signature);
   }
 
   async refund(orderId: string, signature: string): Promise<OrderResponse> {
@@ -205,6 +267,16 @@ export class DevnetMerchant {
     } catch {
       return { kind: "payment_recorded" };
     }
+  }
+
+  private async finishRefund(orderId: string, signature: string): Promise<OrderResponse> {
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      const tx = await this.fetchTransaction(signature);
+      if (tx?.meta && !tx.meta.err) return this.refund(orderId, signature);
+      if (tx?.meta?.err) throw new Error("Devnet refund transaction failed.");
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    throw new Error("Devnet refund was not confirmed. It was not marked refunded.");
   }
 
   private rememberUnapplied(checkout: CheckoutRecord, signature: string, reason: string): ConfirmResult {

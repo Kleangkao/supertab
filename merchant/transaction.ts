@@ -161,6 +161,33 @@ export function signPreparedTransaction(serialized: string, key: SolanaKey): Uin
   return Uint8Array.from(signed);
 }
 
+/** Fills one zero signature slot. A signature that is already present must already match. */
+export function addSignerSignature(transaction: Uint8Array, key: SolanaKey, signerIndex: number): Uint8Array {
+  const signers = transaction[0] ?? 0;
+  if (signers < 1 || signers > 2 || signerIndex < 0 || signerIndex >= signers) {
+    throw new Error("Signer index is outside this transaction.");
+  }
+  const message = transaction.subarray(1 + signers * 64);
+  const versioned = (message[0]! & 128) !== 0;
+  const header = versioned ? 1 : 0;
+  if (message[header] !== signers) throw new Error("The transaction header does not match its signatures.");
+  const pubkeyAt = header + 4 + signerIndex * 32;
+  const pubkey = message.subarray(pubkeyAt, pubkeyAt + 32);
+  if (pubkey.length !== 32 || Buffer.compare(pubkey, key.publicKey) !== 0) {
+    throw new Error("This signature slot is not the devnet merchant.");
+  }
+  const signature = signBytes(key, message);
+  const slot = 1 + signerIndex * 64;
+  const existing = transaction.subarray(slot, slot + 64);
+  if (existing.every((byte) => byte === 0)) {
+    const signed = Uint8Array.from(transaction);
+    signed.set(signature, slot);
+    return signed;
+  }
+  if (Buffer.compare(existing, signature) !== 0) throw new Error("The merchant signature does not match this refund.");
+  return Uint8Array.from(transaction);
+}
+
 export function signTransaction(built: BuiltTransaction, keys: SolanaKey[]): Uint8Array {
   if (keys.length !== built.signers.length || keys.some((key, index) => key.address !== built.signers[index])) {
     throw new Error("Transaction signers are not in the required order.");
