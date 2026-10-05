@@ -137,7 +137,23 @@ describe("owner-controlled devnet merchant", () => {
     await expect(merchant.submitSignedRefund(paid.order.id, changed.toString("base64"))).rejects.toThrow(/changed the refund/);
     expect(sent).toHaveLength(0);
 
-    const versioned = versionedRefund(Buffer.from(prepared.transaction, "base64"));
+    const raw = Buffer.from(prepared.transaction, "base64");
+    const start = 129;
+    const keyCount = raw[start + 3]!;
+    const keyEnd = start + 4 + keyCount * 32;
+    const instructionStart = keyEnd + 32;
+    const header = [...raw.subarray(start, start + 4)];
+    header[2] += 1;
+    header[3] += 1;
+    const budgeted = Uint8Array.from([
+      ...raw.subarray(0, start), ...header, ...raw.subarray(start + 4, keyEnd),
+      ...requirePubkey("ComputeBudget111111111111111111111111111111", "budget"),
+      ...raw.subarray(keyEnd, instructionStart), raw[instructionStart]! + 2,
+      keyCount, 0, 5, 2, 64, 13, 3, 0,
+      keyCount, 0, 9, 3, 0, 0, 0, 0, 0, 0, 0, 0,
+      ...raw.subarray(instructionStart + 1),
+    ]);
+    const versioned = versionedRefund(budgeted);
     const message = versioned.subarray(1 + versioned[0]! * 64);
     versioned.set(signBytes(fixture.buyer, message), 1);
     const refunded = await merchant.submitSignedRefund(paid.order.id, Buffer.from(versioned).toString("base64"));

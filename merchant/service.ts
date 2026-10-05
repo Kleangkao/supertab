@@ -7,7 +7,7 @@ import {
 import { assertProductQuantity, MerchantStore, postedTotal, settlementFor, type CheckoutRecord, type OrderRecord } from "./store";
 import type { SolanaKey } from "./keys";
 import { addSignerSignature, buildPaymentTransaction, buildRefundTransaction, transactionBase64, type BuiltTransaction } from "./transaction";
-import { samePaymentMessage } from "../src/lib/payment-message";
+import { samePaymentMessage, samePaymentWithWalletBudget } from "../src/lib/payment-message";
 import { verifyTransfer, type ChainTransaction } from "./verify";
 
 export const MERCHANT_SEPARATION = "This owner-controlled devnet merchant proves the integration. It does not prove that another retailer accepts Solana.";
@@ -167,7 +167,9 @@ export class DevnetMerchant {
     if (!prepared || !relay) throw new Error("Prepare the refund again.");
     if (prepared.signature) return this.finishRefund(orderId, prepared.signature);
     const signed = Buffer.from(signedTransaction, "base64");
-    if (!samePaymentMessage(prepared.transaction, signed)) throw new Error("The wallet changed the refund. No refund was sent.");
+    if (!samePaymentMessage(prepared.transaction, signed) && !samePaymentWithWalletBudget(prepared.transaction, signed)) {
+      throw new Error("The wallet changed the refund or exceeded the devnet priority-fee limit. No refund was sent.");
+    }
     if (signed.subarray(1, 65).every((byte) => byte === 0)) throw new Error("The buyer has not signed this refund.");
     const full = addSignerSignature(signed, relay.merchant, 1);
     const signature = await relay.send(full);

@@ -292,6 +292,7 @@ export function DevnetPurchase() {
       {wallets.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{wallets.map((item, index) => <button key={index} disabled={!!busy} onClick={() => void connect(item)}>Connect {item.name}</button>)}</div>}
       {address && <p className="mono">{address}</p>}
       {address && !devnetCapable && <div className="notice warning" role="status">This wallet account is not on Solana devnet. No payment was requested.</div>}
+      <p>Connect Phantom on Solana devnet before Review. After Review, approve, sign, and send within 60 seconds. The checkout expires with its blockhash.</p>
       <div className="wallet-actions">
         <button className="primary" disabled={!!busy || !address} onClick={() => void review()}>Review merchant checkout</button>
         {checkout && <button className="secondary" disabled={!!busy} onClick={clearReview}>Cancel review</button>}
@@ -305,7 +306,7 @@ export function DevnetPurchase() {
         <p>Merchant recipient {checkout.recipient}</p>
         <p>Payment reference {checkout.reference}</p>
         <p>Mint {checkout.mint}</p>
-        <p>Expires {checkout.expiresAt}</p>
+        <p>Expires {checkout.expiresAt}{now > 0 ? ` · ${Math.max(0, Math.ceil((Date.parse(checkout.expiresAt) - now) / 1000))} seconds left` : ""}</p>
         <p>Network fees are paid separately in devnet SOL. Approval allows wallet priority fees up to 0.0001 devnet SOL, plus the network base fee. The USDC total stays unchanged.</p>
         <button className="secondary" disabled={!!busy || approvedId === checkout.id} onClick={() => setApprovedId(checkout.id)}>
           {approvedId === checkout.id ? "Purchase approved" : `Approve this purchase · ${usdc(checkout.totalMinor)}`}
@@ -325,6 +326,7 @@ export function DevnetPurchase() {
       {order?.status === "paid" && <section className="notice subtle" aria-label="Devnet refund">
         <strong>Refund this devnet payment</strong>
         <p>Return {usdc(order.totalMinor)} Circle devnet USDC from the owner-controlled merchant to the buyer. This is not a retailer return.</p>
+        <p>Your wallet pays the devnet network fee. Signing allows a priority fee up to 0.0001 devnet SOL, plus the network base fee.</p>
         <button className="secondary" disabled={!!busy} onClick={() => void prepareRefund()}>Prepare refund</button>
         <button className="primary" disabled={!!busy || !refundTransaction || !address} onClick={() => void signRefund()}>Sign and send refund</button>
       </section>}
