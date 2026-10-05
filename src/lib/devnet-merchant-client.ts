@@ -69,6 +69,15 @@ export async function submitDevnetSignature(baseUrl: string, checkoutId: string,
   return { status: response.status, body: await response.json() as unknown };
 }
 
+/** Reads an order through SuperTab. The merchant decides the status; a failure stays a failure. */
+export async function fetchDevnetMerchantOrder(orderId: string, fetchImpl: typeof fetch = fetch): Promise<DevnetMerchantOrder> {
+  const response = await fetchImpl(`/api/devnet-merchant/order?id=${encodeURIComponent(orderId)}`, { cache: "no-store" });
+  const body = await response.json() as DevnetMerchantOrder & { error?: string };
+  if (!response.ok) throw new Error(body.error ?? "The merchant has no order with that id.");
+  if (!body.id || !body.status || !body.paymentSignature) throw new Error("The merchant response was not an order.");
+  return body;
+}
+
 /** Reads an order from the merchant. A missing order is not rewritten as confirmed. */
 export async function readDevnetOrder(baseUrl: string, orderId: string, fetchImpl: typeof fetch = fetch): Promise<DevnetMerchantOrder | null> {
   const response = await fetchImpl(new URL(`/orders/${encodeURIComponent(orderId)}`, baseUrl));

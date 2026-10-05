@@ -1,5 +1,25 @@
 # SuperTab demo
 
+## Prototype script — no new payment
+
+This build is a prototype. The devnet payment did not buy the tee, and no real-retailer purchase has been completed.
+
+From `supertab-main`:
+
+```bash
+npm run merchant
+npm run dev
+```
+
+Open http://localhost:3000.
+
+1. Read **Real product — quote only**. It is Solana Spaces, Just Build It Tee, Medium, quantity 1, checked October 5, 2026, for an authorized Thailand destination. The recorded breakdown is item $35.00, GlobalPost Economy shipping $20.53, displayed tax $0.00, merchant total $55.53, and a visible USDC option of $55.53. Estimated delivery was October 19. Duties and network fees are unverified. There is no payment action.
+2. If you want a current merchant total, use **Open Solana Spaces for a fresh quote**. That leaves SuperTab. Do not pay.
+3. Choose **View verified test order**. SuperTab reads order `e485b032-7abd-4a59-849c-f37775ec57c6` from the local merchant. Say the status the merchant returns. Do not describe the page as creating that order.
+4. Optional: open **Devnet test purchase** at http://localhost:3000/devnet and use the same view action. Leave the two earlier paid orders as they are. Do not start a checkout.
+
+The devnet USDC amount is the test price. Devnet SOL is only the network fee.
+
 ## Two-minute presenter flow
 
 1. Ask for a black polo under $50. Explain that these are real provider listings, with actual merchant names and prices. Follow up with a preference to show conversation constraints persist.

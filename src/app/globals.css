@@ -40,6 +40,17 @@ a { color:inherit; }
 .suggestions>span { margin-right:5px; }
 .suggestions button { border:1px solid var(--line); border-radius:99px; padding:8px 12px; font-size:12px; background:transparent; }
 .suggestions button span { margin-left:10px; color:#70925c; }
+.prototype-paths { margin:8px 0 28px; }
+.prototype-paths h2 { font-size:28px; font-weight:550; letter-spacing:-1px; margin:0 0 8px; }
+.prototype-paths > p { color:var(--muted); font-size:14px; line-height:1.7; max-width:640px; }
+.path-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px; }
+.path-card { border:1px solid var(--line); border-radius:17px; background:white; padding:18px; }
+.path-card h3 { margin:0 0 8px; font-size:20px; font-weight:550; letter-spacing:-.4px; }
+.path-card p, .path-card li { font-size:13px; line-height:1.65; color:var(--muted); }
+.path-card .eyebrow { margin-bottom:8px; }
+.path-card .wallet-actions { margin:12px 0; }
+.path-card a.secondary { text-decoration:none; }
+.prototype-paths summary { font-size:13px; margin-bottom:8px; }
 .intro-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:36px; border-top:1px solid var(--line); padding:30px 0 60px; }
 .intro-steps span { font-size:10px; letter-spacing:1.5px; color:#77926a; }
 .intro-steps h2 { font-size:16px; font-weight:550; margin:12px 0 8px; }
@@ -166,7 +177,7 @@ footer details { text-align:right; }
 footer details p { margin:8px 0; }
 @media (min-width:1400px) { .app-shell { padding:0 64px; } .workspace.has-review { gap:60px; } }
 @media (max-width:1000px) { .app-shell { padding:0 28px; } .workspace.has-review { grid-template-columns:minmax(0,1fr) 360px; gap:24px; } .purchase-review { padding:20px; } .product-image { height:180px; } .product-info { padding:13px; } .product-price { align-items:start; flex-direction:column; } .hero h1 { font-size:52px; } }
-@media (max-width:760px) { .app-shell { padding:0 20px; } .topbar { min-height:78px; } .wordmark { font-size:21px; } .demo-note { max-width:110px; font-size:10px; line-height:1.6; } .workspace.has-review { display:block; } .hero { padding-top:46px; } .hero h1,.hero.compact h1 { font-size:42px; letter-spacing:-2px; } .hero-copy { font-size:14px; } .composer { padding:16px; } .composer textarea { font-size:16px; } .composer-bottom>span { max-width:150px; font-size:10px; } .suggestions { margin-bottom:36px; } .suggestions>span { width:100%; } .intro-steps { grid-template-columns:1fr; gap:18px; padding-bottom:32px; } .intro-steps p { margin-bottom:0; } .product-grid,.has-review .product-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .product-image { height:180px; } .product-info h3 { font-size:12px; } .product-info button { font-size:10px; padding:9px; gap:6px; } .product-price strong { font-size:19px; } .results-heading { align-items:start; } .results-heading>span { font-size:10px; max-width:110px; text-align:right; } .purchase-review { margin:0 0 32px; padding:22px; } footer { flex-direction:column; gap:12px; } footer details { text-align:left; } }
+@media (max-width:760px) { .path-grid { grid-template-columns:1fr; } .app-shell { padding:0 20px; } .topbar { min-height:78px; } .wordmark { font-size:21px; } .demo-note { max-width:110px; font-size:10px; line-height:1.6; } .workspace.has-review { display:block; } .hero { padding-top:46px; } .hero h1,.hero.compact h1 { font-size:42px; letter-spacing:-2px; } .hero-copy { font-size:14px; } .composer { padding:16px; } .composer textarea { font-size:16px; } .composer-bottom>span { max-width:150px; font-size:10px; } .suggestions { margin-bottom:36px; } .suggestions>span { width:100%; } .intro-steps { grid-template-columns:1fr; gap:18px; padding-bottom:32px; } .intro-steps p { margin-bottom:0; } .product-grid,.has-review .product-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .product-image { height:180px; } .product-info h3 { font-size:12px; } .product-info button { font-size:10px; padding:9px; gap:6px; } .product-price strong { font-size:19px; } .results-heading { align-items:start; } .results-heading>span { font-size:10px; max-width:110px; text-align:right; } .purchase-review { margin:0 0 32px; padding:22px; } footer { flex-direction:column; gap:12px; } footer details { text-align:left; } }
 @media (max-width:380px) { .product-grid,.has-review .product-grid { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
 .wallet-message { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.5; padding: 1rem; border: 1px solid var(--line); border-radius: 12px; }

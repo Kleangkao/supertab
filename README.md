@@ -1,5 +1,9 @@
 # SuperTab
 
+Prototype. A shopper can review one recorded Solana Spaces quote and, separately, a completed owner-controlled devnet purchase and refund. The devnet payment did not buy the shirt, and no real-retailer purchase has been completed.
+
+From this directory, start the local merchant with `npm run merchant`, then `npm run dev`, and open http://localhost:3000. The no-payment demo is in [docs/DEMO.md](docs/DEMO.md). Current evidence is in [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+
 SuperTab is AI shopping powered by Solana assets. A shopper describes a product. SuperTab searches real merchants, compares the offers it actually received, and works out whether USDC already in the shopper's Solana wallet covers the known price. If it does not, DFlow can quote a conversion from a supported Solana asset into USDC. A replaceable card rail is meant to pay an ordinary merchant later. That rail is not connected, and this build does not move funds.
 
 ## What works now

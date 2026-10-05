@@ -1,5 +1,9 @@
 # Purchase route decision — October 4, 2026
 
+## October 5: authorized real-merchant quote only
+
+The owner authorized using their delivery address solely to calculate a quote. It is intentionally omitted here. The guest checkout at https://solanaspaces.com/checkout accepted the Thailand destination and returned delivery rates for one Just Build It Tee, Medium. GlobalPost Economy was selected by default: item $35.00, shipping $20.53, displayed tax $0.00, merchant total $55.53. Estimated delivery was October 19. The payment section visibly offered Solana wallets and USDC at $55.53. No duties were itemized, so this does not establish a duties-inclusive landed cost. Network fees were not verified. No wallet was connected, signature requested, payment submitted, or order placed. Complete Purchase remained disabled. A reserved example.com email was used for the quote test. This is live merchant quote evidence, separate from the completed owner-controlled devnet purchase/refund.
+
 No route yet connects one purchase across a selected product, a payable amount, Solana wallet funding, accepted merchant payment, and an independent merchant order.
 
 The current milestone is one merchant-backed Solana USDC purchase. No accessible merchant can prove it. The owner has to authorize an owner-controlled devnet store before any integration. The required setup is recorded under "Merchant milestone". Earlier route evidence stays below and was not rechecked.
@@ -183,4 +187,4 @@ Orders `ab0421c2-e708-40cd-b30c-a1e2a433b512` and `3518beef-1b53-4e5c-8682-0baca
 
 ## Next retailer access
 
-Solana Spaces remains the strongest evidenced existing-store route. Its checkout can quote shipping after a full address, accepts Phantom, spends mainnet USDC, and returns its own order id after `signTransaction`. The missing piece is authorization to execute, not a missing payment mechanism. Do not add that integration, spend mainnet funds, or contact the store until the owner authorizes the purchase and supplies the address. Details are in `docs/PROJECT_STATE.md`.
+The October 5 quote for one Just Build It Tee, Medium, is recorded in the shopping page as quote-only evidence. It is not a payable amount. An earlier attempt stopped before a street address and showed only the $35.00 shirt price; that attempt was superseded by the recorded shipping quote. SuperTab does not refresh the quote or place the order. The verified devnet refund is a separate owner-controlled test. Details are in `docs/PROJECT_STATE.md`.

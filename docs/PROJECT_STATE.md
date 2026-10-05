@@ -1,5 +1,9 @@
 # SuperTab project state
 
+## Latest quote evidence — October 5, 2026
+
+With owner-authorized delivery information (not stored in this document), Solana Spaces returned Thailand shipping rates for one Just Build It Tee, Medium: item $35.00 + GlobalPost Economy $20.53 + displayed tax $0.00 = merchant total $55.53; estimated arrival October 19. Its payment section visibly offered USDC and Solana wallets. Duties and network fees remain unverified. No wallet connection, signing, payment, or order placement occurred. This supersedes the earlier street-address blocker. Preserve the separation between this live quote and the completed controlled devnet order. Do not spend mainnet funds.
+
 Updated October 5, 2026.
 
 ## Fixed product goal
@@ -22,26 +26,33 @@ OCTOBER 4, NOT THIS MILESTONE. Generated-payer payment `3kQNnZbAXi4CTuXkatAQoRG3
 
 ## Demo
 
-From `supertab-main`:
+From `supertab-main`, in two terminals:
 
 1. `npm run merchant` loads `.env.local` and listens on `http://127.0.0.1:8787`.
-2. `npm run dev` serves `http://localhost:3000/devnet`.
-3. The page is labeled DEVNET and owner-controlled.
-4. Read order `e485b032-7abd-4a59-849c-f37775ec57c6`. Expect status refunded and both signatures above.
-5. A new checkout is a separate payment. Do not start one to repeat this evidence.
+2. `npm run dev` serves `http://localhost:3000`.
 
-The USDC total is the merchant price. Devnet SOL pays the network base fee. Phantom may add a priority fee up to 0.0001 devnet SOL. That fee does not change the USDC amount.
+Open `http://localhost:3000`. No new payment is required.
 
-## Real-product dependency
+1. Under **Real product — quote only**, read the Just Build It Tee evidence: date, destination scope, item, shipping, tax, merchant total, visible USDC option, and unverified duties and network fees. Confirm there is no approve, sign, or pay action. The merchant link only opens Solana Spaces for a fresh quote.
+2. Under **Devnet test purchase**, choose **View verified test order**, or open `http://localhost:3000/devnet` and use the same action. The status comes back from the merchant. For `e485b032-7abd-4a59-849c-f37775ec57c6`, expect `refunded` and both signatures above, while the merchant still has that record.
+3. A new checkout is a separate payment. Do not start one to repeat this evidence. The devnet marker is not the tee.
 
-Solana Spaces is the strongest evidenced route for an existing shipped product. `solanaspaces.com` lists the Just Build It Tee, its checkout names Phantom and Solflare with mainnet USDC, and `createOrderWithPayment` runs after `signTransaction` and returns the store's `orderId` and `paymentSignature`. Shipping and tax are calculated at checkout once a full address is present. That mechanism is supported. Executing it is not authorized: it spends mainnet USDC, and no street address has been supplied. Do not treat a missing shipping price on the product page as a rejection.
+The USDC total on the devnet page is the test merchant’s price. Devnet SOL pays the network base fee. Phantom may add a priority fee up to 0.0001 devnet SOL. That fee does not change the USDC amount.
 
-No integration code should be added until the owner authorizes that mainnet payment and supplies the address. Proposed outreach is unnecessary because the public checkout already accepts the wallet. Do not contact the store. Earlier closed checks stay in `docs/CLOSED_ROUTES.md`.
+## Real-merchant quote, October 5, 2026
+
+This is not a purchase. No signature was requested and Complete Purchase stayed disabled.
+
+The recorded quote is the one in the shopping page under **Real product — quote only**: Just Build It Tee, Medium, quantity 1, checked October 5, 2026, for an authorized Thailand destination. Item $35.00, GlobalPost Economy $20.53, displayed tax $0.00, merchant total $55.53, visible USDC option $55.53, estimated delivery October 19. Duties and network fees were not verified. An earlier checkout screen showed only the $35.00 shirt price before a complete destination. That screen is not the recorded quote.
+
+SuperTab does not refresh this quote. Solana Spaces is not on the Shopify checkout allowlist, and this build does not call a store API or scrape checkout. The page links to `https://solanaspaces.com/checkout` so a person can request a fresh quote on the merchant site. That link does not submit an address or a payment. The recorded amounts cannot approve, fund, sign, or pay.
+
+The verified devnet order `e485b032-7abd-4a59-849c-f37775ec57c6` remains a separate owner-controlled refund. It does not pay for this shirt.
 
 ## Checks
 
-On October 5, 2026, `npx vitest run` passed 130 tests and skipped 5. ESLint reported no errors on the changed devnet files. `npx tsc --noEmit` succeeded. `npm run build` succeeded.
+On October 5, 2026, `npx vitest run` passed 138 tests and skipped 5. ESLint reported no errors on the prototype files. `npx tsc --noEmit` succeeded. `npm run build` succeeded. Browser checks read the merchant’s refunded order and a missing order; they did not create a transaction.
 
 ## Next action
 
-Authorize one mainnet USDC purchase of the Solana Spaces Just Build It Tee, and provide the street address its checkout requires. Until then, do not spend mainnet funds or start another devnet payment.
+Use the prototype on the shopping page. The Solana Spaces quote stays quote-only. The devnet order is read from the merchant and is not a shirt purchase. Duties and network fees on the retail quote remain unverified. Do not sign or place a Solana Spaces order. No mainnet purchase is authorized.
