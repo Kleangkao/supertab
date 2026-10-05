@@ -26,6 +26,7 @@ import {
 import { fetchConversionOrder, DflowRouteError, QUOTE_FRESHNESS_MS, type DflowQuote } from "./dflow";
 import { formatFixedMinor } from "./money";
 import { DEFAULT_SOL_RESERVE_LAMPORTS, NATIVE_SOL_MINT, USDC_DECIMALS, USDC_MINT, WSOL_MINT } from "./tokens";
+import { mainnetExecutionGate } from "./purchase-workflow";
 import { isPlausibleAddress, MAINNET_GENESIS_HASH, readSolanaBalances } from "./wallet";
 
 const PROBE_LAMPORTS = 10_000_000n;
@@ -117,6 +118,7 @@ export interface PreparedDigitalPurchase {
   };
   readyForApproval: boolean;
   blockers: string[];
+  executionGate: "off" | "on";
 }
 
 export async function prepareBitcoinAnchorPurchase(input: {
@@ -415,6 +417,7 @@ function finish(
     },
     readyForApproval: bounded,
     blockers: unique,
+    executionGate: mainnetExecutionGate(),
   };
 }
 

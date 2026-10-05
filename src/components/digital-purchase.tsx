@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { reviewStillBound } from "@/lib/digital-purchase";
 import type { PreparedDigitalPurchase } from "@/lib/digital-purchase-service";
+import { EXECUTION_GATE_LABEL, WORKFLOW_STAGES, WORKFLOW_STAGE_LABELS } from "@/lib/purchase-status";
 import {
   CLAIM_REVIEW,
   createPreparedAttempt,
@@ -31,6 +32,7 @@ export function DigitalPurchase({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoveryNote, setRecoveryNote] = useState<string | null>(null);
+  const [workflowLabel, setWorkflowLabel] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const storedRaw = useSyncExternalStore(subscribeAttempts, readAttemptSnapshot, readAttemptServerSnapshot);
   const storedAttempt = parseStoredAttempt(storedRaw);
@@ -56,6 +58,44 @@ export function DigitalPurchase({
   const merchantExpired = !!visible && now >= Date.parse(visible.terms.expiresAt);
   const conversionExpired = !!visible?.conversion.expiresAt && now >= Date.parse(visible.conversion.expiresAt);
   const expired = merchantExpired || conversionExpired;
+
+  async function recordTerms() {
+    if (!visible || walletSource !== "connected" || !visible.recovery.idempotencyKey || !visible.wallet.address || !visible.spend.solLamports) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/digital-purchase/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          attemptId: visible.recovery.idempotencyKey,
+          terms: {
+            wallet: visible.wallet.address,
+            network: "solana:mainnet",
+            productId: "bitcoin_anchor",
+            digest: visible.payload.digest,
+            amountAtomic: visible.terms.amountAtomic,
+            recipient: visible.terms.payTo,
+            sponsor: visible.terms.feePayer,
+            merchantExpiresAt: visible.terms.expiresAt,
+            conversionInputLamports: visible.conversion.inputLamports,
+            minimumOutputAtomic: visible.conversion.minimumUsdcAtomic,
+            slippageBps: visible.conversion.slippageBps,
+            prioritizationFeeLamports: visible.conversion.prioritizationFeeLamports ?? "0",
+            solCapLamports: visible.spend.solLamports,
+            reserveLamports: visible.spend.reserveLamports,
+          },
+        }),
+      });
+      const body = await response.json() as { error?: string; workflow?: { state?: string } };
+      if (!response.ok) throw new Error(body.error ?? "The terms were not recorded.");
+      setWorkflowLabel(body.workflow?.state ?? null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The terms were not recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function requestQuote() {
     if (!mainnet) return;
@@ -153,7 +193,13 @@ export function DigitalPurchase({
       <div className="detail-row"><span>Previous comparison</span><strong>0.008585479 SOL, not authorization</strong></div>
       <div className="detail-row"><span>SOL reserve</span><strong>0.010000000 SOL kept back</strong></div>
       <div className="detail-row"><span>Spending review</span><strong>{visible.wallet.source === "connected" && visible.readyForApproval && !expired && !unresolved ? "Spending review only. Not an approval to pay." : "Not an approval package"}</strong></div>
+      <div className="detail-row"><span>Execution gate</span><strong>{visible.executionGate === "off" ? "Off" : "On, with no send adapter"}</strong></div>
+      <div className="detail-row"><span>Recorded terms</span><strong>{workflowLabel ? WORKFLOW_STAGE_LABELS[workflowLabel as keyof typeof WORKFLOW_STAGE_LABELS] ?? workflowLabel : "Not recorded"}</strong></div>
       <div className="detail-row"><span>Execution</span><strong>Unavailable</strong></div>
+      <p>SOL spent on a conversion is the quoted input plus its network fees. The 0.01 SOL reserve stays outside that cap. USDC above the 1 USDC payment stays in the wallet. The 1 USDC total is not added again as SOL.</p>
+      <div className="wallet-actions">
+        <button className="secondary" type="button" disabled={busy || walletSource !== "connected" || !visible.readyForApproval || expired || unresolved || !visible.recovery.idempotencyKey} onClick={() => void recordTerms()}>Record these terms</button>
+      </div>
       {visible.paymentPreview && <div role="status"><strong>Merchant payment preview: unsigned</strong><p>{visible.paymentPreview.detail}</p></div>}
       <p>{visible.spend.unusedUsdc}</p>
       <p>{visible.payload.retained} {visible.payload.returned}</p>
@@ -170,6 +216,19 @@ export function DigitalPurchase({
       <div className="detail-row"><span>Payment authorization</span><strong>Not stored</strong></div>
       <p>A lost response stays on this attempt. It does not start another swap or payment.</p>
     </article>}
+    <article className="path-card">
+      <h3>Purchase progress</h3>
+      <p>{EXECUTION_GATE_LABEL}</p>
+      <ol>
+        {WORKFLOW_STAGES.map((stage) => <li key={stage}>{WORKFLOW_STAGE_LABELS[stage]}{workflowLabel === stage ? " — current" : ""}</li>)}
+      </ol>
+      <div className="wallet-actions">
+        <button className="secondary" type="button" disabled>Sign conversion unavailable</button>
+        <button className="secondary" type="button" disabled>Sign merchant payment unavailable</button>
+        <button className="secondary" type="button" disabled>Send unavailable</button>
+      </div>
+      <p>An unresolved attempt stays on this purchase. These actions do not start another swap or payment.</p>
+    </article>
     <article className="path-card">
       <h3>Wallet claim, not requested</h3>
       <p>{CLAIM_REVIEW.purpose}</p>

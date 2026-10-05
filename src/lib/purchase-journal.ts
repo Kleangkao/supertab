@@ -2,6 +2,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isUnresolvedWorkflow, type WorkflowStage } from "./purchase-status";
+import { parseWorkflow, type PurchaseWorkflow } from "./purchase-workflow";
 
 export interface OriginalPurchaseRequest {
   id: string;
@@ -17,6 +19,7 @@ interface JournalRecord extends OriginalPurchaseRequest {
   version: 1;
   state: "prepared" | "authorization_retained" | "outcome_unknown";
   paymentAuthorization: string | null;
+  workflow: PurchaseWorkflow | null;
 }
 
 /** One immutable attempt per file. Caller must use a private, ignored data directory.
@@ -41,7 +44,10 @@ export class PurchaseJournal {
     if (record.version !== 1 || !record.id || !record.wallet || !["prepared", "authorization_retained", "outcome_unknown"].includes(record.state)) {
       throw new Error("Invalid recovery record. Do not start another payment.");
     }
-    return record;
+    if (record.workflow != null && !parseWorkflow(record.workflow)) {
+      throw new Error("Invalid recovery record. Do not start another payment.");
+    }
+    return { ...record, workflow: record.workflow ?? null };
   }
   prepare(request: OriginalPurchaseRequest): void {
     this.update(() => {
@@ -49,7 +55,7 @@ export class PurchaseJournal {
       if (!request.id || !request.wallet || request.idempotencyKey.length < 16 || request.idempotencyKey.length > 128) throw new Error("Invalid attempt identifiers.");
       const url = new URL(request.requestUrl);
       if (url.origin !== "https://scvd.store" || url.pathname !== "/api/buy/bitcoin_anchor") throw new Error("Unexpected purchase resource.");
-      return { ...request, version: 1, state: "prepared", paymentAuthorization: null };
+      return { ...request, version: 1, state: "prepared", paymentAuthorization: null, workflow: null };
     });
   }
   retainAuthorization(id: string, authorization: string): void {
@@ -65,6 +71,23 @@ export class PurchaseJournal {
       const record = this.match(id);
       if (record.state !== "prepared" || record.paymentAuthorization) throw new Error("Cannot refresh a submitted or authorized attempt.");
       return { ...record, reviewedTerms, unsignedPayment };
+    });
+  }
+  saveWorkflow(id: string, workflow: PurchaseWorkflow): void {
+    const parsed = parseWorkflow(workflow);
+    if (!parsed || parsed.id !== id) throw new Error("Workflow does not match this attempt.");
+    const serialized = JSON.stringify(parsed);
+    if (/"authorization"\s*:/.test(serialized) || serialized.includes("transactionBase64")) {
+      throw new Error("Workflow records cannot store payment authorization.");
+    }
+    this.update(() => {
+      const record = this.match(id);
+      if (parsed.terms && parsed.terms.wallet !== record.wallet) throw new Error("Workflow wallet does not match the stored attempt.");
+      const existing = record.workflow;
+      if (existing && isUnresolvedWorkflow(existing.state as WorkflowStage) && parsed.state === "review") {
+        throw new Error("An unresolved attempt cannot become a new purchase.");
+      }
+      return { ...record, workflow: parsed };
     });
   }
   markSubmitted(id: string): void {

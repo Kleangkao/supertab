@@ -1,5 +1,19 @@
 # SuperTab project state
 
+## Purchase workflow — October 6, 2026
+
+This is still SCVD General Store’s “A Bitcoin Anchor,” quantity 1, at exactly 1.000000 mainnet USDC. It is a digital timestamp-service test. It is not a physical purchase and it does not prove shipping to Thailand. No mainnet swap, payment, signature, claim, letter, or refund was sent. The existing devnet orders were not changed.
+
+ORCHESTRATION. One workflow keeps review, approved terms, swap prepared, swap signed, swap submitted or uncertain, swap confirmed, funding rechecked, payment prepared, payment signed, merchant submission or uncertain, certificate verified, timestamp proof pending, and Bitcoin anchor verified as different states. A submitted or uncertain attempt cannot be replaced by a new purchase. Approval is the exact wallet, network, product, digest, amount, recipient, sponsor, conversion input, minimum output, slippage, fees, and SOL cap. The SOL cap is the conversion input plus its network fees. The 0.01 SOL reserve stays outside it. The 1 USDC total is not added again as SOL. A client `approved` flag or `walletSource` string is not spending authority. Quote expiry and a signed transaction’s blockhash expiry stop the current step. A signed transaction is not rewritten. If USDC already covers 1 USDC, conversion is skipped. After a confirmed conversion, a short balance keeps the USDC and does not start the merchant payment.
+
+PAYMENT AND RECEIPT. The sponsored preview keeps the shopper in signature slot 1 and the sponsor in slot 0. Slot 0 must stay empty until the sponsor signs. The signed message must match the retained unsigned message. Merchant submission requires the original authorization to be stored first, and expired authorization is not replayed. SuperTab does not broadcast a sponsored payment itself. Certificate checks are ed25519 over the exact UTF-8 `signed_payload`, and the public key must be one published at `https://scvd.store/.well-known/scvd-signing-key`. Matching JSON fields without that signature is not acceptance. On-chain settlement has to match the wallet, amount, mint, and recipient. A valid certificate with a pending Bitcoin proof stays pending.
+
+GATE AND STORAGE. `SUPERTAB_MAINNET_EXECUTION` defaults to off. `POST /api/digital-purchase/execute` returns HTTP 403 even if the body asks to execute, and it does not call the network. Opening the flag still has no send adapter in this build. Attempts are encrypted with AES-256-GCM. The key file is `merchant/secrets/purchase-recovery.key` and the ciphertext is under `data/purchase-recovery/`. Both are gitignored. This is local desktop custody. An ephemeral host that loses the disk loses the attempt and must not invent a new payment. Payment authorization is not returned to the browser or written in Git.
+
+FIXTURES, NOT A LIVE PURCHASE. `tests/purchase-workflow.test.ts` covers changed approval terms, the shopper signature slot, mutated and invalid signatures, expiry, insufficient funds, a lost or failed swap, restart, duplicate submission, an unrelated certificate, pending Bitcoin proof, and USDC left in the wallet. Those fixtures do not spend. The browser shows the progress list and disabled sign and send controls.
+
+BLOCKER. Live mainnet execution is not wired. A later spending review has to name this product, 1.000000 USDC, the connected wallet, and the fresh SOL cap on screen. Setting the gate is not that approval.
+
 ## Recovery record — October 5, 2026
 
 This is still the digital timestamping-service test for SCVD General Store’s “A Bitcoin Anchor,” quantity 1. It is not a physical purchase and it does not prove shipping to Thailand. No swap, payment, signature, claim, letter, or refund was sent. Execution remains unavailable.
@@ -140,7 +154,7 @@ Reference: https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact
 
 Verification: 169 tests passed, 7 skipped; TypeScript and production build passed. Builder fixtures inspect wire-format signer slots, exact transfer, ATA derivation, sponsor isolation, memo, and rejection of stale/altered terms. Browser inspection confirmed quote-only controls and disabled claim signing. The real Phantom connection and connected-source live preview have not yet been exercised. No funds moved.
 
-Next human check: in Edge with Phantom installed, open http://localhost:3000 (not /devnet), connect the intended wallet, confirm its public address in Timestamp service — quote only, and select Refresh unpaid quote. Approve connection only, not a message or transaction. The page should show the unsigned preview or a specific quote error; report which. A payment still requires later exact spending approval.
+Next human check: in Edge with Phantom installed, open http://localhost:3000 (not /devnet), connect the intended wallet, confirm its public address in Timestamp service — quote only, and select Refresh unpaid quote. Approve connection only, not a message or transaction. The page should show the unsigned preview or a specific quote error; report which. Sign conversion, sign merchant payment, and send stay unavailable while the execution gate is off. A payment still requires a later approval naming this product, 1.000000 USDC, that wallet, and the fresh SOL cap then on screen.
 
 
 ## Blocked quote regression fixed — October 6, 2026
