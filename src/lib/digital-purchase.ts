@@ -25,8 +25,8 @@ export const SOL_BASE_FEE_LAMPORTS = 5_000n;
 export const EXPECTED_AMOUNT_ATOMIC = 1_000_000n;
 /** Last reviewed merchant recipient. A different account is a different payment. */
 export const REVIEWED_MERCHANT_RECIPIENT = "DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE";
-/** Last reviewed sponsor. The shopper does not pay this network fee while this account is the fee payer. */
-export const REVIEWED_FEE_PAYER = "Hc3sdEAsCGQcpgfivywog9uwtk8gUBUZgsxdME1EJy88";
+/** Sponsor on the Solana accept read 2026-10-06. The October 5 sponsor is no longer offered. A different account is a different payment. */
+export const REVIEWED_FEE_PAYER = "BFK9TLC3edb13K6v4YyH3DwPb5DSUpkWvb7XnqCL9b4F";
 /** Browser comparison from 2026-10-05T14:39:47Z. Not a spending authorization. */
 export const PREVIOUS_SOL_CAP_LAMPORTS = 8_585_479n;
 export const MAINNET_WALLET_CHAIN = "solana:mainnet";

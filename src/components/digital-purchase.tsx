@@ -17,22 +17,35 @@ import {
   subscribeAttempts,
 } from "@/lib/purchase-recovery";
 
+type ServerPurchase = {
+  executionGate?: "off" | "on";
+  error?: string | null;
+  purpose?: string | null;
+  unsignedTransaction?: string | null;
+  workflow?: { state?: string; mismatch?: string | null; usdcPreserved?: boolean; paymentAuthorization?: string } | null;
+};
+
 export function DigitalPurchase({
   address = "",
   network = "",
   walletSource = "not_selected",
   onUseReadOnly,
+  signTransaction,
 }: {
   address?: string;
   network?: "solana:mainnet" | "solana:devnet" | "";
   walletSource?: "connected" | "read_only" | "not_selected";
   onUseReadOnly?: () => void;
+  signTransaction?: (transaction: Uint8Array) => Promise<Uint8Array>;
 }) {
   const [review, setReview] = useState<PreparedDigitalPurchase | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoveryNote, setRecoveryNote] = useState<string | null>(null);
   const [workflowLabel, setWorkflowLabel] = useState<string | null>(null);
+  const [server, setServer] = useState<ServerPurchase | null>(null);
+  const [preparedTransaction, setPreparedTransaction] = useState<string | null>(null);
+  const [purpose, setPurpose] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const storedRaw = useSyncExternalStore(subscribeAttempts, readAttemptSnapshot, readAttemptServerSnapshot);
   const storedAttempt = parseStoredAttempt(storedRaw);
@@ -54,6 +67,19 @@ export function DigitalPurchase({
   }, [review]);
 
   const visible = bound && review?.wallet.source === walletSource ? review : null;
+  const attemptId = resumed.current?.id ?? visible?.recovery.idempotencyKey ?? null;
+  useEffect(() => {
+    if (!attemptId || walletSource !== "connected") return;
+    let cancel = false;
+    void fetch(`/api/digital-purchase/status?attemptId=${encodeURIComponent(attemptId)}`, { headers: { accept: "application/json" } })
+      .then((response) => response.json() as Promise<ServerPurchase>)
+      .then((body) => { if (!cancel) setServer(body); })
+      .catch(() => { if (!cancel) setServer(null); });
+    return () => { cancel = true; };
+  }, [attemptId, walletSource, workflowLabel]);
+
+  const executionGate = server?.executionGate ?? visible?.executionGate ?? "off";
+  const serverState = server?.workflow?.state ?? workflowLabel;
   const unresolved = resumed.current != null && resumed.current.state !== "prepared_not_submitted" && resumed.current.state !== "bitcoin_anchoring_verified";
   const merchantExpired = !!visible && now >= Date.parse(visible.terms.expiresAt);
   const conversionExpired = !!visible?.conversion.expiresAt && now >= Date.parse(visible.conversion.expiresAt);
@@ -90,8 +116,69 @@ export function DigitalPurchase({
       const body = await response.json() as { error?: string; workflow?: { state?: string } };
       if (!response.ok) throw new Error(body.error ?? "The terms were not recorded.");
       setWorkflowLabel(body.workflow?.state ?? null);
+      setServer(body);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The terms were not recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function postAttempt(action: string, signedTransaction?: string) {
+    if (executionGate !== "on" || !attemptId || !address) return null;
+    const response = await fetch("/api/digital-purchase/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, attemptId, wallet: address, ...(signedTransaction ? { signedTransaction } : {}) }),
+    });
+    const body = await response.json() as ServerPurchase;
+    setServer(body);
+    setWorkflowLabel(body.workflow?.state ?? null);
+    if (body.purpose) setPurpose(body.purpose);
+    if (body.unsignedTransaction) setPreparedTransaction(body.unsignedTransaction);
+    if (!response.ok || body.error) throw new Error(body.error ?? "The attempt did not continue.");
+    return body;
+  }
+
+  async function prepareSignature(action: "prepare_swap" | "prepare_payment") {
+    if (executionGate !== "on") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAttempt(action);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The transaction was not prepared.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signPrepared(action: "accept_swap_signature" | "accept_payment_signature") {
+    if (executionGate !== "on" || !signTransaction || !preparedTransaction || !purpose) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const bytes = Uint8Array.from(atob(preparedTransaction), (char) => char.charCodeAt(0));
+      const signed = await signTransaction(bytes);
+      let binary = "";
+      signed.forEach((byte) => { binary += String.fromCharCode(byte); });
+      await postAttempt(action, btoa(binary));
+      setPreparedTransaction(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The signature was not accepted.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPrepared(action: "submit_swap" | "submit_payment" | "reconcile" | "verify_certificate" | "replay_payment") {
+    if (executionGate !== "on") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAttempt(action);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The attempt did not continue.");
     } finally {
       setBusy(false);
     }
@@ -193,9 +280,9 @@ export function DigitalPurchase({
       <div className="detail-row"><span>Previous comparison</span><strong>0.008585479 SOL, not authorization</strong></div>
       <div className="detail-row"><span>SOL reserve</span><strong>0.010000000 SOL kept back</strong></div>
       <div className="detail-row"><span>Spending review</span><strong>{visible.wallet.source === "connected" && visible.readyForApproval && !expired && !unresolved ? "Spending review only. Not an approval to pay." : "Not an approval package"}</strong></div>
-      <div className="detail-row"><span>Execution gate</span><strong>{visible.executionGate === "off" ? "Off" : "On, with no send adapter"}</strong></div>
-      <div className="detail-row"><span>Recorded terms</span><strong>{workflowLabel ? WORKFLOW_STAGE_LABELS[workflowLabel as keyof typeof WORKFLOW_STAGE_LABELS] ?? workflowLabel : "Not recorded"}</strong></div>
-      <div className="detail-row"><span>Execution</span><strong>Unavailable</strong></div>
+      <div className="detail-row"><span>Execution gate</span><strong>{executionGate === "off" ? "Off" : "On. Spending still requires this stored approval."}</strong></div>
+      <div className="detail-row"><span>Recorded terms</span><strong>{serverState ? WORKFLOW_STAGE_LABELS[serverState as keyof typeof WORKFLOW_STAGE_LABELS] ?? serverState : "Not recorded"}</strong></div>
+      <div className="detail-row"><span>Execution</span><strong>{executionGate === "off" ? "Unavailable" : "Gated"}</strong></div>
       <p>SOL spent on a conversion is the quoted input plus its network fees. The 0.01 SOL reserve stays outside that cap. USDC above the 1 USDC payment stays in the wallet. The 1 USDC total is not added again as SOL.</p>
       <div className="wallet-actions">
         <button className="secondary" type="button" disabled={busy || walletSource !== "connected" || !visible.readyForApproval || expired || unresolved || !visible.recovery.idempotencyKey} onClick={() => void recordTerms()}>Record these terms</button>
@@ -218,16 +305,26 @@ export function DigitalPurchase({
     </article>}
     <article className="path-card">
       <h3>Purchase progress</h3>
-      <p>{EXECUTION_GATE_LABEL}</p>
+      <p>{executionGate === "off" ? EXECUTION_GATE_LABEL : "The execution gate is on. Each signature and each submission is a separate action, and only the stored attempt can move."}</p>
+      <p>A conversion signature would approve one SOL to USDC swap for the reviewed input, minimum USDC, slippage, and fee. It does not pay the merchant.</p>
+      <p>A merchant-payment signature is slot 1 of the sponsored 1.000000 USDC transfer. Slot 0 stays empty for the sponsor. SuperTab does not broadcast that transaction.</p>
+      {purpose && <p>{purpose}</p>}
+      {server?.workflow?.usdcPreserved && <div className="notice warning" role="status">Converted USDC stays in this wallet. The purchase stopped before merchant payment. Do not send another payment to recover it.</div>}
+      {server?.error && <div className="notice warning" role="status">{server.error}</div>}
       <ol>
-        {WORKFLOW_STAGES.map((stage) => <li key={stage}>{WORKFLOW_STAGE_LABELS[stage]}{workflowLabel === stage ? " — current" : ""}</li>)}
+        {WORKFLOW_STAGES.map((stage) => <li key={stage}>{WORKFLOW_STAGE_LABELS[stage]}{serverState === stage ? " — current" : ""}</li>)}
       </ol>
       <div className="wallet-actions">
-        <button className="secondary" type="button" disabled>Sign conversion unavailable</button>
-        <button className="secondary" type="button" disabled>Sign merchant payment unavailable</button>
-        <button className="secondary" type="button" disabled>Send unavailable</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "approved_terms"} onClick={() => void prepareSignature("prepare_swap")}>Prepare conversion signature</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || !preparedTransaction || !purpose || serverState !== "swap_prepared"} onClick={() => void signPrepared("accept_swap_signature")}>Sign conversion</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "swap_signed"} onClick={() => void submitPrepared("submit_swap")}>Submit conversion</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "funding_rechecked"} onClick={() => void prepareSignature("prepare_payment")}>Prepare merchant payment</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || !preparedTransaction || !purpose || serverState !== "payment_prepared"} onClick={() => void signPrepared("accept_payment_signature")}>Sign merchant payment</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "payment_signed"} onClick={() => void submitPrepared("submit_payment")}>Submit merchant payment</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on"} onClick={() => void submitPrepared("reconcile")}>Reconcile the original attempt</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on"} onClick={() => void submitPrepared("replay_payment")}>Replay the original payment</button>
       </div>
-      <p>An unresolved attempt stays on this purchase. These actions do not start another swap or payment.</p>
+      <p>Signing and sending stay unavailable while the gate is off. An unresolved attempt stays on this purchase. These actions do not start another swap or payment.</p>
     </article>
     <article className="path-card">
       <h3>Wallet claim, not requested</h3>

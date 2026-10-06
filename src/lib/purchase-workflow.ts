@@ -48,6 +48,9 @@ export interface PurchaseWorkflow {
   paymentAuthorization: "not_stored" | "retained";
   appliedEventIds: string[];
   updatedAt: string;
+  swapExecutionMode?: "sync" | "async" | null;
+  pendingSwapSignature?: string | null;
+  paymentMemo?: string | null;
 }
 
 export interface WorkflowStep {
@@ -74,7 +77,7 @@ export function createReview(id: string, nowIso: string): PurchaseWorkflow {
     version: 1, id, state: "review", terms: null, retainedMessage: null, conversionSkipped: false,
     swapSignature: null, settlementTx: null, certId: null, bitcoinProof: "absent", quoteExpired: false,
     lifetimeExpired: false, mismatch: null, usdcPreserved: false, paymentAuthorization: "not_stored",
-    appliedEventIds: [], updatedAt: nowIso,
+    appliedEventIds: [], updatedAt: nowIso, swapExecutionMode: null, pendingSwapSignature: null, paymentMemo: null,
   };
 }
 
@@ -467,6 +470,9 @@ export function publicWorkflow(workflow: PurchaseWorkflow): Omit<PurchaseWorkflo
     quoteExpired: workflow.quoteExpired, lifetimeExpired: workflow.lifetimeExpired, mismatch: workflow.mismatch,
     usdcPreserved: workflow.usdcPreserved, paymentAuthorization: workflow.paymentAuthorization,
     appliedEventIds: workflow.appliedEventIds, updatedAt: workflow.updatedAt,
+    swapExecutionMode: workflow.swapExecutionMode ?? null,
+    pendingSwapSignature: workflow.pendingSwapSignature ?? null,
+    paymentMemo: workflow.paymentMemo ?? null,
   };
   return { ...visible, ...stopped, executionGate: mainnetExecutionGate(), executionReady: false };
 }

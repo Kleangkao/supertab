@@ -7,7 +7,7 @@ import { AssetConversion } from "@/components/asset-conversion";
 import { DigitalPurchase } from "@/components/digital-purchase";
 import { PrototypePaths } from "@/components/prototype-paths";
 import { CheckoutReview } from "@/components/checkout-review";
-import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet, type StandardWalletAccount } from "@/lib/wallet-standard";
+import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signMainnetTransaction, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet, type StandardWalletAccount } from "@/lib/wallet-standard";
 import type { WalletChallenge } from "@/lib/wallet-proof";
 import type { DevnetSigningCheck } from "@/lib/devnet-memo";
 import { clearWalletReview } from "@/lib/wallet-review";
@@ -307,6 +307,11 @@ export function ShopApp() {
           address={purchase?.walletKind === "sample" ? "" : address}
           network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : walletChains.includes("solana:mainnet") ? "solana:mainnet" : ""}
           walletSource={!address || purchase?.walletKind === "sample" || !walletChains.includes("solana:mainnet") ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
+          signTransaction={walletMode === "connected" ? async (transaction) => {
+            const wallet = activeWallet.current;
+            if (!wallet) throw new Error("Connect the wallet that reviewed these terms.");
+            return signMainnetTransaction(wallet, address, transaction, activeAccount.current ?? undefined);
+          } : undefined}
           onUseReadOnly={() => { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; walletDesk.current = null; walletEpoch.current++; setWalletSigned(false); setWalletChallenge(null); setCanSignMessage(false); setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
         />
         <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />

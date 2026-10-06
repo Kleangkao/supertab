@@ -1,5 +1,19 @@
 # SuperTab project state
 
+## Execution adapters — October 6, 2026
+
+The Bitcoin Anchor path now has real DFlow and merchant adapters behind the default-off gate. `SUPERTAB_MAINNET_EXECUTION` is still unset. No swap, payment, signature, claim, or devnet order was sent.
+
+SWAP. `prepare_swap` asks DFlow for a fresh order and accepts it only when the input, minimum output, slippage, fee, mints, and wallet match the stored approval. Sync orders are submitted with `sendTransaction` and count only after `confirmed` or `finalized` with no chain error. Async orders use the same submission, then `GET /order-status`; a landed opening transaction is not a fill until status is `closed` at the approved minimum. A lost response or “already processed” reconciles that signature. It does not build another swap. If USDC is still short, the attempt stays funded in the wallet and does not start merchant payment.
+
+MERCHANT. Payment is a v2 `PAYMENT-SIGNATURE` retry of `GET /api/buy/bitcoin_anchor` with the stored `Idempotency-Key`. The shopper signature is slot 1 and the sponsor slot stays empty. SuperTab does not broadcast that transaction. The authorization is encrypted before the request. A rejection stays on the original attempt. Settlement is read from the chain: source, mint, 1 USDC, and recipient. Certificate checks use ed25519 over `signed_payload` and the keys at `https://scvd.store/.well-known/scvd-signing-key`. `existence.status` `pending` stays timestamp-proof pending. `bounded` with a Bitcoin block is the only anchored state.
+
+GATE. Every swap broadcast, merchant submission, and original-payment replay checks the server gate at its own boundary. A client `execute` or `approved` flag does not open it. The browser shows separate prepare, sign, and submit actions. They stay disabled while the gate is off, and page load does not request a signature.
+
+FIXTURES. `tests/purchase-execution.test.ts` drives the adapter functions with injected transports. Gate off makes zero send or payment calls. One approved attempt produces one original swap submission and one merchant submission. Pending Bitcoin proof is not labeled complete.
+
+NOT PROVEN. No live signature, swap, payment, or certificate for this purchase. Sponsor acceptance of the zero-priority preview is still the merchant’s decision at submission time. A read-only 402 on October 6 still asks for 1.000000 mainnet USDC to `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`. The Solana sponsor is now `BFK9TLC3edb13K6v4YyH3DwPb5DSUpkWvb7XnqCL9b4F`. The October 5 sponsor is not in that accept. A later spending review has to name this product, quantity 1, exactly 1.000000 USDC, the connected wallet, this sponsor, and the fresh SOL cap then on screen.
+
 ## Purchase workflow — October 6, 2026
 
 This is still SCVD General Store’s “A Bitcoin Anchor,” quantity 1, at exactly 1.000000 mainnet USDC. It is a digital timestamp-service test. It is not a physical purchase and it does not prove shipping to Thailand. No mainnet swap, payment, signature, claim, letter, or refund was sent. The existing devnet orders were not changed.
@@ -8,11 +22,11 @@ ORCHESTRATION. One workflow keeps review, approved terms, swap prepared, swap si
 
 PAYMENT AND RECEIPT. The sponsored preview keeps the shopper in signature slot 1 and the sponsor in slot 0. Slot 0 must stay empty until the sponsor signs. The signed message must match the retained unsigned message. Merchant submission requires the original authorization to be stored first, and expired authorization is not replayed. SuperTab does not broadcast a sponsored payment itself. Certificate checks are ed25519 over the exact UTF-8 `signed_payload`, and the public key must be one published at `https://scvd.store/.well-known/scvd-signing-key`. Matching JSON fields without that signature is not acceptance. On-chain settlement has to match the wallet, amount, mint, and recipient. A valid certificate with a pending Bitcoin proof stays pending.
 
-GATE AND STORAGE. `SUPERTAB_MAINNET_EXECUTION` defaults to off. `POST /api/digital-purchase/execute` returns HTTP 403 even if the body asks to execute, and it does not call the network. Opening the flag still has no send adapter in this build. Attempts are encrypted with AES-256-GCM. The key file is `merchant/secrets/purchase-recovery.key` and the ciphertext is under `data/purchase-recovery/`. Both are gitignored. This is local desktop custody. An ephemeral host that loses the disk loses the attempt and must not invent a new payment. Payment authorization is not returned to the browser or written in Git.
+GATE AND STORAGE. `SUPERTAB_MAINNET_EXECUTION` defaults to off. `POST /api/digital-purchase/execute` returns HTTP 403 even if the body asks to execute, and it does not call the network. The adapters exist and run only when that server gate is on and the stored approval matches. Attempts are encrypted with AES-256-GCM. The key file is `merchant/secrets/purchase-recovery.key` and the ciphertext is under `data/purchase-recovery/`. Both are gitignored. This is local desktop custody. An ephemeral host that loses the disk loses the attempt and must not invent a new payment. Payment authorization is not returned to the browser or written in Git.
 
 FIXTURES, NOT A LIVE PURCHASE. `tests/purchase-workflow.test.ts` covers changed approval terms, the shopper signature slot, mutated and invalid signatures, expiry, insufficient funds, a lost or failed swap, restart, duplicate submission, an unrelated certificate, pending Bitcoin proof, and USDC left in the wallet. Those fixtures do not spend. The browser shows the progress list and disabled sign and send controls.
 
-BLOCKER. Live mainnet execution is not wired. A later spending review has to name this product, 1.000000 USDC, the connected wallet, and the fresh SOL cap on screen. Setting the gate is not that approval.
+The send and merchant adapters now exist and stay refused while the gate is off. A later spending review has to name this product, 1.000000 USDC, the connected wallet, and the fresh SOL cap on screen. Setting the gate is not that approval.
 
 ## Recovery record — October 5, 2026
 

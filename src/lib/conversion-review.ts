@@ -186,13 +186,15 @@ export function validateConversionTransaction(input: {
   lookupTables: DisclosedLookupTable[];
   prioritizationFeeLamports: bigint | null;
   executionMode: string | null;
+  /** Quote review stays synchronous. Submission may also accept a documented async order. */
+  allowAsync?: boolean;
 }): ConversionReview["validation"] {
   const rejected = (explanation: string): ConversionReview["validation"] => ({
     status: "rejected",
     explanation,
     limits: VALIDATION_LIMITS,
   });
-  if (input.executionMode !== "sync") {
+  if (input.executionMode !== "sync" && !(input.allowAsync === true && input.executionMode === "async")) {
     return rejected("DFlow did not return a synchronous conversion, so the transaction terms are not accepted.");
   }
   if (input.outputMint !== USDC_MINT) {

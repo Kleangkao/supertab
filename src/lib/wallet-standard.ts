@@ -138,6 +138,30 @@ export async function signWalletMessage(wallet: StandardWallet, address: string,
   return btoa(String.fromCharCode(...output.signature));
 }
 
+const MAINNET_CHAIN = "solana:mainnet";
+
+/** Signs one mainnet transaction and returns it. This never sends. */
+export async function signMainnetTransaction(
+  wallet: StandardWallet,
+  address: string,
+  transaction: Uint8Array,
+  account?: StandardWalletAccount,
+): Promise<Uint8Array> {
+  const feature = wallet.features["solana:signTransaction"] as { signTransaction?: (input: {
+    account: StandardWalletAccount; transaction: Uint8Array; chain: typeof MAINNET_CHAIN;
+  }) => Promise<{ signedTransaction: Uint8Array }[]> } | undefined;
+  const resolved = signingAccount(wallet, address, account);
+  if (!resolved?.chains?.includes(MAINNET_CHAIN) || typeof feature?.signTransaction !== "function") {
+    throw new Error("This wallet account cannot sign a Solana mainnet transaction.");
+  }
+  const outputs = await feature.signTransaction({ account: resolved, transaction, chain: MAINNET_CHAIN });
+  const returned = outputs[0]?.signedTransaction;
+  if (outputs.length !== 1 || !(returned instanceof Uint8Array)) {
+    throw new Error("The wallet did not return one signed transaction. Nothing was sent.");
+  }
+  return Uint8Array.from(returned);
+}
+
 /** Account, chain or capability changes invalidate the reviewed wallet terms. */
 export function watchStandardWallet(wallet: StandardWallet, invalidate: () => void): () => void {
   const feature = wallet.features["standard:events"] as {

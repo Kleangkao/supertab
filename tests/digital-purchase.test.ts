@@ -10,6 +10,7 @@ import {
   parseSolanaExactTerms,
   PREVIOUS_SOL_CAP_LAMPORTS,
   PRODUCT_PRICE_CAP_ATOMIC,
+  REVIEWED_FEE_PAYER,
   recoverUncertainPurchase,
   reviewStillBound,
   solSpendCap,
@@ -21,7 +22,7 @@ import { NATIVE_SOL_MINT, USDC_MINT } from "../src/lib/tokens";
 import type { AssetBalance } from "../src/lib/tokens";
 
 const PAY_TO = "DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE";
-const FEE_PAYER = "Hc3sdEAsCGQcpgfivywog9uwtk8gUBUZgsxdME1EJy88";
+const FEE_PAYER = REVIEWED_FEE_PAYER;
 const NOW = Date.parse("2026-10-05T14:21:10.000Z");
 
 function requirements(overrides: Record<string, unknown> = {}) {
