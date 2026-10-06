@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { associatedTokenAddress } from "../../merchant/ata";
 import { compile, MEMO_PROGRAM } from "../../merchant/transaction";
 import { TOKEN_PROGRAM } from "../../merchant/product";
-import { bitcoinAnchorBuyUrl, EXPECTED_AMOUNT_ATOMIC, REVIEWED_FEE_PAYER, REVIEWED_MERCHANT_RECIPIENT, SOLANA_MAINNET_CAIP, termsAreCurrent, type SolanaExactTerms } from "./digital-purchase";
+import { bitcoinAnchorBuyUrl, EXPECTED_AMOUNT_ATOMIC, REVIEWED_MERCHANT_RECIPIENT, SOLANA_MAINNET_CAIP, termsAreCurrent, type SolanaExactTerms } from "./digital-purchase";
+import { isPlausibleAddress } from "./wallet";
 import { USDC_MINT } from "./tokens";
 import { COMPUTE_BUDGET_PROGRAM } from "./conversion-review";
 
@@ -14,7 +15,7 @@ export function buildSponsoredPaymentPreview(input: {
   const { terms, wallet } = input;
   if (!termsAreCurrent(terms, input.nowMs)) throw new Error("The merchant quote expired.");
   if (terms.network !== SOLANA_MAINNET_CAIP || terms.mint !== USDC_MINT || terms.amountAtomic !== EXPECTED_AMOUNT_ATOMIC.toString()
-    || terms.payTo !== REVIEWED_MERCHANT_RECIPIENT || terms.feePayer !== REVIEWED_FEE_PAYER
+    || terms.payTo !== REVIEWED_MERCHANT_RECIPIENT || !isPlausibleAddress(terms.feePayer)
     || terms.resourceUrl !== bitcoinAnchorBuyUrl(terms.digest)) throw new Error("The payment terms changed.");
   if (!wallet || wallet === terms.feePayer || wallet === terms.payTo || !input.attemptId) throw new Error("The shopper must be distinct from the sponsor and recipient.");
   const memo = terms.memo ?? createHash("sha256").update(input.attemptId).digest("hex");

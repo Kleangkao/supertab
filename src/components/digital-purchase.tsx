@@ -71,7 +71,7 @@ export function DigitalPurchase({
   useEffect(() => {
     if (!attemptId || walletSource !== "connected") return;
     let cancel = false;
-    void fetch(`/api/digital-purchase/status?attemptId=${encodeURIComponent(attemptId)}`, { headers: { accept: "application/json" } })
+    void fetch(`/api/digital-purchase/status?attemptId=${encodeURIComponent(attemptId)}`, { method: "POST", headers: { accept: "application/json" } })
       .then((response) => response.json() as Promise<ServerPurchase>)
       .then((body) => { if (!cancel) setServer(body); })
       .catch(() => { if (!cancel) setServer(null); });

@@ -45,9 +45,18 @@ it("encodes a zero-signature v0 payment with isolated sponsor and exact Transfer
 });
 it("refuses stale or altered terms, sponsor-as-shopper, and oversized memos", () => {
   expect(() => buildSponsoredPaymentPreview({ ...input, nowMs: now + 300_000 })).toThrow(/expired/);
-  for (const change of [{ amountAtomic: "2000000" }, { feePayer: wallet }, { payTo: wallet }, { mint: wallet }]) {
+  for (const change of [{ amountAtomic: "2000000" }, { payTo: wallet }, { mint: wallet }]) {
     expect(() => buildSponsoredPaymentPreview({ ...input, terms: { ...terms, ...change } as SolanaExactTerms })).toThrow(/changed/);
   }
   expect(() => buildSponsoredPaymentPreview({ ...input, wallet: REVIEWED_FEE_PAYER })).toThrow(/distinct/);
+  expect(() => buildSponsoredPaymentPreview({ ...input, terms: { ...terms, feePayer: wallet } })).toThrow(/distinct/);
+  expect(() => buildSponsoredPaymentPreview({ ...input, terms: { ...terms, feePayer: "invalid" } })).toThrow(/changed/);
   expect(() => buildSponsoredPaymentPreview({ ...input, terms: { ...terms, memo: "x".repeat(257) } })).toThrow(/memo/);
+});
+it("uses the sponsor from a fresh quote without giving it transfer authority", () => {
+  const sponsor = "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM";
+  const built = buildSponsoredPaymentPreview({ ...input, terms: { ...terms, feePayer: sponsor } });
+  expect(encodeBase58(built.message.slice(5, 37))).toBe(sponsor);
+  expect(encodeBase58(built.message.slice(37, 69))).toBe(wallet);
+  expect([...built.transaction.slice(1, 129)].every(byte => byte === 0)).toBe(true);
 });

@@ -1,5 +1,13 @@
 # SuperTab project state
 
+## Fresh sponsor reviews and status reads — October 6, 2026
+
+The merchant rotated its payment sponsor again. Fresh unpaid reviews now use the valid sponsor returned by the fixed merchant endpoint instead of comparing it with a historical global sponsor. The shopper must remain distinct from that sponsor. Recipient, mint, and exact 1 USDC remain pinned. Existing approved attempts still bind their original sponsor and reject a changed quote; signed or submitted attempts cannot be refreshed.
+
+The progress status read now uses same-origin POST because browser GET requests normally omit the Origin required by the guard. This endpoint only reads the journal; the origin guard remains enforced.
+
+A live unpaid quote passed review with no blockers and produced a private unsigned preview. The status endpoint reported execution gate off. No terms were approved and no signatures, swaps, merchant payments, or claims were requested. 195 tests passed, 7 skipped; changed-file lint, TypeScript, and production build passed. Actual mainnet execution remains unproven.
+
 ## Execution adapters — October 6, 2026
 
 The Bitcoin Anchor path now has real DFlow and merchant adapters behind the default-off gate. `SUPERTAB_MAINNET_EXECUTION` is still unset. No swap, payment, signature, claim, or devnet order was sent.

@@ -107,7 +107,7 @@ describe("Solana exact quote", () => {
 });
 
 describe("prepared purchase", () => {
-  it("prepares a covered quote without a conversion or a payment", async () => {
+  it.each([FEE_PAYER, "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM"])("prepares a fresh review with quoted sponsor %s without payment", async (sponsor) => {
     const wallet = generateSolanaKey().address;
     const seen: string[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -117,7 +117,7 @@ describe("prepared purchase", () => {
         expect(init?.method).toBe("GET");
         return new Response("{}", {
           status: 402,
-          headers: { "payment-required": Buffer.from(JSON.stringify(requirements())).toString("base64") },
+          headers: { "payment-required": Buffer.from(JSON.stringify(requirements({ extra: { feePayer: sponsor, quotedAt: "2026-10-05T14:21:09.795Z" } }))).toString("base64") },
         });
       }
       const body = JSON.parse(String(init?.body)) as { method: string };
@@ -156,6 +156,7 @@ describe("prepared purchase", () => {
     expect(review.conversion.status).toBe("skipped");
     expect(review.wallet.source).toBe("connected");
     expect(review.readyForApproval).toBe(true);
+    expect(review.terms.feePayer).toBe(sponsor);
     expect(review.executionReady).toBe(false);
     expect(review.wallet.address).toBe(wallet);
     expect(review.wallet.network).toBe("solana:mainnet");

@@ -11,7 +11,6 @@ import {
   merchantUsdcAccount,
   parseSolanaExactTerms,
   PREVIOUS_SOL_CAP_LAMPORTS,
-  REVIEWED_FEE_PAYER,
   REVIEWED_MERCHANT_RECIPIENT,
   solSpendCap,
   termsAreCurrent,
@@ -160,7 +159,6 @@ export async function prepareBitcoinAnchorPurchase(input: {
   if (!termsAreCurrent(terms, nowMs)) blockers.push("The merchant quote has expired.");
   if (terms.amountAtomic !== EXPECTED_AMOUNT_ATOMIC.toString()) blockers.push("The merchant amount is not the reviewed 1.000000 USDC.");
   if (terms.payTo !== REVIEWED_MERCHANT_RECIPIENT) blockers.push("The merchant recipient changed from the reviewed account.");
-  if (terms.feePayer !== REVIEWED_FEE_PAYER) blockers.push("The payment sponsor changed from the reviewed fee payer.");
   if (!merchantUsdc) blockers.push("The merchant USDC account is missing, so this payment cannot be bounded without an account-creation cost.");
 
   const walletSource: "connected" | "read_only" = input.walletSource === "connected" ? "connected" : "read_only";

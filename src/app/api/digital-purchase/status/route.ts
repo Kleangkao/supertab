@@ -5,7 +5,8 @@ import { sameOriginRequest } from "@/lib/request-origin";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+// POST supplies Origin for the existing same-origin guard; this only reads the journal.
+export async function POST(request: Request) {
   const headers = { "cache-control": "no-store" };
   if (!sameOriginRequest(request)) {
     return Response.json({ error: "Use the prepared purchase from SuperTab." }, { status: 403, headers });
