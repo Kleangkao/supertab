@@ -1,5 +1,11 @@
 # SuperTab project state
 
+## Authorized preparation attempt — October 6, 2026
+
+The owner authorized one 1 USDC Bitcoin Anchor purchase for the connected wallet, with the named sponsor and a maximum total SOL spend of 0.008585479 SOL, preserving 0.01 SOL. An unpaid review at 0.008541424 SOL was recorded as approved terms. The local execution gate was briefly enabled for unsigned preparation, which refused changed conversion terms. No transaction was signed or sent. The gate was disabled again.
+
+Swap validation now permits higher minimum output or lower priority fees within the original recorded cap, while retaining exact input, mints, and slippage. Both unsigned preparation and signed validation use the same bounds. A live retry remained blocked; live quotes must not be presented as an executed conversion. 197 tests passed, 7 skipped; typecheck and changed-file lint passed. The recorded attempt is still approved and unsubmitted; do not erase it or create a replacement payment.
+
 ## Fresh sponsor reviews and status reads — October 6, 2026
 
 Browser recovery metadata also follows a successful server refresh of the unsigned preview, retaining the same attempt and idempotency key. A stale browser sponsor no longer produces a contradictory warning above a valid new review. Submitted or unresolved records, changed amounts or recipients, and records with settlement evidence remain preserved. The follow-up regression suite passed 196 tests with 7 skipped; typecheck and changed-file lint passed.

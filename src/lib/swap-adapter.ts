@@ -46,10 +46,7 @@ export function revalidateSignedSwap(input: {
   if (input.context.inputMint !== WSOL_MINT || input.context.outputMint !== USDC_MINT) {
     throw new Error("The swap mints do not match the approval.");
   }
-  if (input.context.inAmount !== input.approved.conversionInputLamports
-    || input.context.minOutAmount !== input.approved.minimumOutputAtomic
-    || input.context.slippageBps !== input.approved.slippageBps
-    || input.context.prioritizationFeeLamports !== input.approved.prioritizationFeeLamports) {
+  if (!sameFinancialSwap(input.context, input.approved)) {
     throw new Error("The swap terms do not match the approval.");
   }
   assertSignedMessage({
@@ -79,10 +76,13 @@ export function revalidateSignedSwap(input: {
 }
 
 export function sameFinancialSwap(context: SwapContext, approved: BoundTerms): boolean {
+  if (!approved.minimumOutputAtomic || !/^\d+$/.test(context.minOutAmount)
+    || !/^\d+$/.test(context.prioritizationFeeLamports)) return false;
   return context.inAmount === approved.conversionInputLamports
-    && context.minOutAmount === approved.minimumOutputAtomic
+    && BigInt(context.minOutAmount) >= BigInt(approved.minimumOutputAtomic)
     && context.slippageBps === approved.slippageBps
-    && context.prioritizationFeeLamports === approved.prioritizationFeeLamports
+    && BigInt(context.prioritizationFeeLamports) <= BigInt(approved.prioritizationFeeLamports)
+    && BigInt(context.inAmount) + BigInt(context.prioritizationFeeLamports) + 5_000n <= BigInt(approved.solCapLamports)
     && context.inputMint === WSOL_MINT
     && context.outputMint === USDC_MINT;
 }

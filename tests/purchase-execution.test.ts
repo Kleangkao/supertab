@@ -13,7 +13,7 @@ import { acceptApproval, createReview, type BoundTerms } from "../src/lib/purcha
 import { USDC_MINT, WSOL_MINT } from "../src/lib/tokens";
 import { TOKEN_PROGRAM } from "../merchant/product";
 import { FinancialExecutionDisabled } from "../src/lib/execution";
-import { SwapSubmissionLost } from "../src/lib/swap-adapter";
+import { sameFinancialSwap, SwapSubmissionLost } from "../src/lib/swap-adapter";
 
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -27,6 +27,16 @@ const inputLamports = 1_000_000n;
 const priority = 1_000n;
 const minimum = 1_000_000n;
 const output = 1_200_000n;
+
+it("permits only favorable live quote changes within the recorded swap bounds", () => {
+  const context = { inAmount: inputLamports.toString(), minOutAmount: minimum.toString(), slippageBps: 50,
+    prioritizationFeeLamports: priority.toString(), inputMint: WSOL_MINT, outputMint: USDC_MINT } as Parameters<typeof sameFinancialSwap>[0];
+  expect(sameFinancialSwap({ ...context, minOutAmount: "1000001", prioritizationFeeLamports: "999" }, terms())).toBe(true);
+  expect(sameFinancialSwap({ ...context, minOutAmount: "999999" }, terms())).toBe(false);
+  expect(sameFinancialSwap({ ...context, prioritizationFeeLamports: "1001" }, terms())).toBe(false);
+  expect(sameFinancialSwap(context, terms({ solCapLamports: "1005999" }))).toBe(false);
+  expect(sameFinancialSwap({ ...context, inAmount: "1000001" }, terms())).toBe(false);
+});
 
 function journal(): { book: PurchaseJournal; path: string } {
   const directory = mkdtempSync(join(tmpdir(), "supertab-execution-"));
