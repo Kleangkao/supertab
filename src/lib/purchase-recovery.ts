@@ -165,7 +165,7 @@ export function applyRecoveryEvent(attempt: PurchaseAttempt, event: RecoveryEven
 }
 
 /** A new quote must not replace an unresolved submitted attempt or become a second payment. */
-export function rememberPreparedQuote(existing: PurchaseAttempt | null, prepared: PurchaseAttempt): {
+export function rememberPreparedQuote(existing: PurchaseAttempt | null, prepared: PurchaseAttempt, serverRefreshedUnsignedReview = false): {
   attempt: PurchaseAttempt;
   keptExisting: boolean;
   reason: string | null;
@@ -188,6 +188,14 @@ export function rememberPreparedQuote(existing: PurchaseAttempt | null, prepared
     const sameTerms = existing.amountAtomic === prepared.amountAtomic
       && existing.payTo === prepared.payTo
       && existing.feePayer === prepared.feePayer;
+    // The quote endpoint permits this only before approval or signing. Browser
+    // recovery metadata is not spending authority; retain the same attempt key.
+    if (serverRefreshedUnsignedReview && existing.id === prepared.id
+      && existing.idempotencyKey === prepared.idempotencyKey
+      && existing.amountAtomic === prepared.amountAtomic && existing.payTo === prepared.payTo
+      && !existing.certId && !existing.settlementTx && !existing.mismatch) {
+      return { attempt: prepared, keptExisting: false, reason: null };
+    }
     if (!sameTerms) {
       return {
         attempt: existing,

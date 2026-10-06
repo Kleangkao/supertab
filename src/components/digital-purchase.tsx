@@ -219,7 +219,7 @@ export function DigitalPurchase({
           merchantExpiresAt: body.terms.expiresAt,
           nowIso: new Date().toISOString(),
         });
-        const remembered = rememberPreparedQuote(readStoredAttempt(window.localStorage), prepared);
+        const remembered = rememberPreparedQuote(readStoredAttempt(window.localStorage), prepared, body.paymentPreview?.status === "built_unsigned");
         persistConnectedAttempt(remembered.attempt, window.localStorage);
         if (remembered.reason) setRecoveryNote(remembered.reason);
       }

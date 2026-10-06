@@ -148,6 +148,20 @@ describe("purchase recovery fixtures", () => {
     expect(changed.retrySwap).toBe(false);
   });
 
+  it("updates browser sponsor metadata only after the server refreshes the unsigned review", () => {
+    const original = prepared();
+    const fresh = { ...original, feePayer: other };
+    expect(rememberPreparedQuote(original, fresh).attempt.feePayer).toBe(original.feePayer);
+    const refreshed = rememberPreparedQuote(original, fresh, true);
+    expect(refreshed.reason).toBeNull();
+    expect(refreshed.attempt.feePayer).toBe(other);
+    expect(refreshed.attempt.idempotencyKey).toBe(original.idempotencyKey);
+    expect(refreshed.attempt.paymentAuthorization).toBe("not_stored");
+    const lost = applyRecoveryEvent(original, { id: "lost", type: "response_lost", nowIso: original.updatedAt }).attempt;
+    expect(rememberPreparedQuote(lost, fresh, true).attempt).toEqual(lost);
+    expect(rememberPreparedQuote(original, { ...fresh, amountAtomic: "2000000" }, true).attempt).toEqual(original);
+  });
+
   it("resumes an unresolved attempt after a restart and does not replace it", () => {
     const storage = memory();
     const lost = applyRecoveryEvent(prepared(), { id: "lost", type: "response_lost", nowIso: "2026-10-05T15:01:00.000Z" }).attempt;

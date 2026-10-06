@@ -2,6 +2,8 @@
 
 ## Fresh sponsor reviews and status reads — October 6, 2026
 
+Browser recovery metadata also follows a successful server refresh of the unsigned preview, retaining the same attempt and idempotency key. A stale browser sponsor no longer produces a contradictory warning above a valid new review. Submitted or unresolved records, changed amounts or recipients, and records with settlement evidence remain preserved. The follow-up regression suite passed 196 tests with 7 skipped; typecheck and changed-file lint passed.
+
 The merchant rotated its payment sponsor again. Fresh unpaid reviews now use the valid sponsor returned by the fixed merchant endpoint instead of comparing it with a historical global sponsor. The shopper must remain distinct from that sponsor. Recipient, mint, and exact 1 USDC remain pinned. Existing approved attempts still bind their original sponsor and reject a changed quote; signed or submitted attempts cannot be refreshed.
 
 The progress status read now uses same-origin POST because browser GET requests normally omit the Origin required by the guard. This endpoint only reads the journal; the origin guard remains enforced.
