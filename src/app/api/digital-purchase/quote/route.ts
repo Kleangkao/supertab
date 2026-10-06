@@ -48,10 +48,12 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       });
       else journal.refreshUnsignedReview(id, reviewedTerms, unsignedPayment);
+      if (review.checkedSwap?.executionMode === "sync") journal.retainCheckedSwap(id, review.checkedSwap);
       review.paymentPreview = { status: "built_unsigned", version: "v0", signatureSlots: 2, signaturesPresent: 0,
         memo: preview.memo, lastValidBlockHeight: lifetime.lastValidBlockHeight!,
         detail: "Unsigned 1 USDC payment stored privately. Shopper and sponsor signature slots are empty. Not simulated, not sponsor-approved, not signed, and not sent. Conversion must settle before payment funding is checked again." };
     }
+    delete review.checkedSwap;
     return Response.json(review, { headers });
   } catch (error) {
     const message = error instanceof DigitalPurchaseError

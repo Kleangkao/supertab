@@ -23,6 +23,7 @@ import {
   validateConversionTransaction,
 } from "./conversion-review";
 import { fetchConversionOrder, DflowRouteError, QUOTE_FRESHNESS_MS, type DflowQuote } from "./dflow";
+import { transactionBlockhash } from "./swap-adapter";
 import { formatFixedMinor } from "./money";
 import { DEFAULT_SOL_RESERVE_LAMPORTS, NATIVE_SOL_MINT, USDC_DECIMALS, USDC_MINT, WSOL_MINT } from "./tokens";
 import { mainnetExecutionGate } from "./purchase-workflow";
@@ -118,6 +119,20 @@ export interface PreparedDigitalPurchase {
   readyForApproval: boolean;
   blockers: string[];
   executionGate: "off" | "on";
+  checkedSwap?: {
+    executionMode: "sync";
+    inAmount: string;
+    outAmount: string;
+    minOutAmount: string;
+    slippageBps: number;
+    prioritizationFeeLamports: string;
+    inputMint: string;
+    outputMint: string;
+    lookupTables: { address: string; addresses: Record<string, string> }[];
+    lastValidBlockHeight: number;
+    blockhash: string;
+    unsignedTransaction: string;
+  };
 }
 
 export async function prepareBitcoinAnchorPurchase(input: {
@@ -238,6 +253,7 @@ export async function prepareBitcoinAnchorPurchase(input: {
       apiKey: deps.config.dflowApiKey ?? undefined,
       slippageBps: deps.config.dflowSlippageBps,
       fetchImpl,
+      syncOnly: true,
     });
   } catch (error) {
     if (!(error instanceof DflowRouteError)) throw error;
@@ -277,7 +293,7 @@ export async function prepareBitcoinAnchorPurchase(input: {
   if (!cap || cap.status !== "bounded") {
     blockers.push("SOL fees plus the conversion input are not bounded inside the reserved SOL.");
   }
-  return finish(terms, nowMs, blockers, {
+  const prepared = finish(terms, nowMs, blockers, {
     buyerUsdc: buyerUsdc ? "present" : "missing",
     merchantUsdc: merchantUsdc ? "present" : "missing",
   }, wallet, {
@@ -292,8 +308,30 @@ export async function prepareBitcoinAnchorPurchase(input: {
     quotedAt: new Date(nowMs).toISOString(),
     expiresAt: new Date(nowMs + QUOTE_FRESHNESS_MS).toISOString(),
     validation: validation.status,
-    detail: "Coverage uses minimum received. The unsigned transaction was checked and discarded, so its blockhash is not part of this review.",
+    detail: validation.status === "checked"
+      ? "Coverage uses minimum received. The synchronous unsigned order is retained for this attempt until its blockhash expires."
+      : "Coverage uses minimum received. The unsigned transaction was not a synchronous order that could be retained.",
   }, cap && cap.status === "bounded" ? cap.lamports : null);
+  const encodedOrder = order.transactionBase64;
+  const transaction = encodedOrder ? decodeTransaction(encodedOrder) : null;
+  if (validation.status === "checked" && encodedOrder && transaction && order.quote.executionMode === "sync"
+    && order.quote.lastValidBlockHeight != null && priority != null && order.quote.slippageBps != null) {
+    prepared.checkedSwap = {
+      executionMode: "sync",
+      inAmount: order.quote.inAmount.toString(),
+      outAmount: order.quote.outAmount.toString(),
+      minOutAmount: order.quote.minOutAmount.toString(),
+      slippageBps: order.quote.slippageBps,
+      prioritizationFeeLamports: priority.toString(),
+      inputMint: order.quote.inputMint,
+      outputMint: order.quote.outputMint,
+      lookupTables: parseDisclosedLookupTables(order.lookupTables),
+      lastValidBlockHeight: order.quote.lastValidBlockHeight,
+      blockhash: transactionBlockhash(transaction),
+      unsignedTransaction: encodedOrder,
+    };
+  }
+  return prepared;
 }
 
 async function sizeSolConversion(
@@ -313,7 +351,7 @@ async function sizeSolConversion(
         outputMint: USDC_MINT,
         amount,
         wrapAndUnwrapSol: true,
-      }, options);
+      }, { ...options, syncOnly: true });
     } catch (error) {
       if (!(error instanceof DflowRouteError)) throw error;
       continue;
@@ -350,7 +388,7 @@ function finish(
   }
   const comparison = solCap == null ? null : compareSolCap(solCap);
   if (comparison?.exceedsPrevious) {
-    blockers.push(`The SOL cap is ${formatFixedMinor(solCap ?? 0n, 9)} SOL, above the previous comparison of ${formatFixedMinor(PREVIOUS_SOL_CAP_LAMPORTS, 9)} SOL. The earlier figure is not a spending authorization.`);
+    blockers.push(`The SOL cap is ${formatFixedMinor(solCap ?? 0n, 9)} SOL, above the authorized limit of ${formatFixedMinor(PREVIOUS_SOL_CAP_LAMPORTS, 9)} SOL.`);
   }
   const conversionCurrent = !conversion.expiresAt || nowMs < Date.parse(conversion.expiresAt);
   if (!conversionCurrent) blockers.push("The conversion quote has expired.");

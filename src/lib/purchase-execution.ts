@@ -2,13 +2,14 @@
 import { decodeTransaction, parseDisclosedLookupTables, validateConversionTransaction } from "./conversion-review";
 import { fetchConversionOrder } from "./dflow";
 import {
+  authorizedSolCeiling,
   bitcoinAnchorBuyUrl,
   DigitalPurchaseError,
   EXPECTED_AMOUNT_ATOMIC,
   parseSolanaExactTerms,
+  SOL_BASE_FEE_LAMPORTS,
   SOLANA_MAINNET_CAIP,
 } from "./digital-purchase";
-import { encodeBase58 } from "./base58";
 import { readConfig, type AppConfig } from "./config";
 import { FinancialExecutionDisabled } from "./execution";
 import {
@@ -41,16 +42,18 @@ import {
   preparePayment,
   prepareSwap,
   publicWorkflow,
+  rebindUnsignedConversion,
   recheckFunding,
-  refreshUnsignedLifetime,
   skipConversion,
   type PurchaseWorkflow,
   type SettlementProof,
 } from "./purchase-workflow";
 import {
+  conversionFitsAuthorization,
   messageOf,
   revalidateSignedSwap,
   sameFinancialSwap,
+  transactionBlockhash,
   SwapAlreadyProcessed,
   SwapSubmissionLost,
   transactionSignature,
@@ -145,8 +148,37 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
   if (!workflow.terms?.conversionInputLamports || workflow.terms.slippageBps == null) {
     return refuse(input.gate, "This approval does not include a conversion.", workflow);
   }
-  if (workflow.state !== "approved_terms" && workflow.state !== "swap_prepared") {
-    return refuse(input.gate, "A swap can be prepared only from approved terms.", workflow);
+  const record = input.journal.read();
+  if (record?.signedSwap || record?.swapSubmission || (workflow.state !== "approved_terms" && workflow.state !== "swap_prepared")) {
+    return refuse(input.gate, "A signed or submitted conversion was not refreshed.", workflow);
+  }
+  const height = await input.transports.blockHeight();
+  const retained = record?.swapContext;
+  if (retained?.unsignedTransaction && workflow.state === "swap_prepared" && height <= retained.lastValidBlockHeight && sameFinancialSwap(retained, workflow.terms)) {
+    const bytes = Buffer.from(retained.unsignedTransaction, "base64");
+    const checked = validateConversionTransaction({
+      transaction: bytes,
+      payer: workflow.terms.wallet,
+      inputMint: retained.inputMint,
+      outputMint: retained.outputMint,
+      inAmount: BigInt(retained.inAmount),
+      outAmount: BigInt(retained.outAmount),
+      minOutAmount: BigInt(retained.minOutAmount),
+      lookupTables: retained.lookupTables,
+      prioritizationFeeLamports: BigInt(retained.prioritizationFeeLamports),
+      executionMode: retained.executionMode,
+      allowAsync: false,
+    });
+    if (checked.status === "checked") {
+      const sol = await input.transports.solLamports(workflow.terms.wallet);
+      if (sol < BigInt(workflow.terms.solCapLamports) + BigInt(workflow.terms.reserveLamports)) {
+        return refuse(input.gate, "The wallet cannot cover the SOL cap and the reserve.", workflow);
+      }
+      return done(input.gate, workflow, {
+        purpose: `Sign one sync SOL to USDC conversion for ${retained.inAmount} lamports, minimum ${retained.minOutAmount} USDC base units, slippage ${retained.slippageBps} bps. This does not pay the merchant.`,
+        unsignedTransaction: retained.unsignedTransaction,
+      });
+    }
   }
   const order = await input.transports.quoteSwap({
     wallet: workflow.terms.wallet,
@@ -156,11 +188,9 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
   if (order.executionMode !== "sync") {
     return refuse(input.gate, "DFlow returned an async order. This purchase signs only a synchronous route. Nothing was signed or sent.", workflow);
   }
-  if (!sameFinancialSwap(order, workflow.terms)) {
-    const changed = invalidateApproval(workflow, `swap-terms-${input.nowMs}`, { ...workflow.terms, conversionInputLamports: order.inAmount }, new Date(input.nowMs).toISOString());
-    input.journal.saveWorkflow(input.attemptId, changed.workflow);
-    return refuse(input.gate, "The conversion terms changed. Record a fresh review. Nothing was signed or sent.", changed.workflow);
-  }
+  const ceiling = authorizedSolCeiling(workflow.terms);
+  const unfit = conversionFitsAuthorization(order, workflow.terms, ceiling);
+  if (unfit) return refuse(input.gate, `${unfit} Nothing was signed or sent.`, workflow);
   const unsigned = validateConversionTransaction({
     transaction: order.transaction,
     payer: workflow.terms.wallet,
@@ -175,14 +205,25 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
     allowAsync: false,
   });
   if (unsigned.status !== "checked") return refuse(input.gate, unsigned.explanation, workflow);
-  const height = await input.transports.blockHeight();
   if (height > order.lastValidBlockHeight) return refuse(input.gate, "The unsigned swap expired. It was not signed or sent.", workflow);
-  const sol = await input.transports.solLamports(workflow.terms.wallet);
+  const total = BigInt(order.inAmount) + BigInt(order.prioritizationFeeLamports) + SOL_BASE_FEE_LAMPORTS;
   const nowIso = new Date(input.nowMs).toISOString();
+  const bound = rebindUnsignedConversion(workflow, `swap-rebind-${input.nowMs}-${order.blockhash}-${order.inAmount}-${order.prioritizationFeeLamports}`, nowIso, {
+    ...workflow.terms,
+    conversionInputLamports: order.inAmount,
+    minimumOutputAtomic: order.minOutAmount,
+    slippageBps: order.slippageBps,
+    prioritizationFeeLamports: order.prioritizationFeeLamports,
+    solCapLamports: total.toString(),
+  });
+  if (bound.workflow.state !== "approved_terms" || !bound.workflow.terms) {
+    return refuse(input.gate, bound.workflow.mismatch ?? "The unsigned conversion was not bound.", bound.workflow);
+  }
+  const sol = await input.transports.solLamports(bound.workflow.terms.wallet);
   const message = messageOf(order.transaction);
-  const step = workflow.state === "swap_prepared"
-    ? refreshUnsignedLifetime(workflow, `swap-lifetime-${order.blockhash}`, nowIso, { message, blockhash: order.blockhash, lastValidBlockHeight: order.lastValidBlockHeight })
-    : prepareSwap(workflow, `swap-prepare-${order.blockhash}`, nowIso, { message, blockhash: order.blockhash, lastValidBlockHeight: order.lastValidBlockHeight, walletLamports: sol });
+  const step = prepareSwap(bound.workflow, `swap-prepare-${input.nowMs}-${order.blockhash}-${order.lastValidBlockHeight}`, nowIso, {
+    message, blockhash: order.blockhash, lastValidBlockHeight: order.lastValidBlockHeight, walletLamports: sol,
+  });
   if (step.workflow.state !== "swap_prepared") return refuse(input.gate, step.workflow.mismatch ?? "The swap was not prepared.", step.workflow);
   const next = { ...step.workflow, swapExecutionMode: order.executionMode };
   const context: SwapContext = {
@@ -197,12 +238,13 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
     lookupTables: order.lookupTables,
     lastValidBlockHeight: order.lastValidBlockHeight,
     blockhash: order.blockhash,
+    unsignedTransaction: Buffer.from(order.transaction).toString("base64"),
   };
   input.journal.saveSwapContext(input.attemptId, context);
   input.journal.saveWorkflow(input.attemptId, next);
   return done(input.gate, next, {
     purpose: `Sign one ${order.executionMode} SOL to USDC conversion for ${order.inAmount} lamports, minimum ${order.minOutAmount} USDC base units, slippage ${order.slippageBps} bps. This does not pay the merchant.`,
-    unsignedTransaction: Buffer.from(order.transaction).toString("base64"),
+    unsignedTransaction: context.unsignedTransaction ?? null,
   });
 }
 
@@ -242,6 +284,9 @@ async function submitSwapAction(input: ActionInput, workflow: PurchaseWorkflow):
     return refuse(input.gate, "The signed swap expired. It was not replaced.", expired.workflow);
   }
   const sol = await input.transports.solLamports(workflow.terms.wallet);
+  if (BigInt(workflow.terms.solCapLamports) > authorizedSolCeiling(workflow.terms)) {
+    return refuse(input.gate, "The conversion costs more SOL than the authorized limit. Nothing was sent.", workflow);
+  }
   if (sol < BigInt(workflow.terms.solCapLamports) + BigInt(workflow.terms.reserveLamports)) {
     return refuse(input.gate, "The wallet cannot cover the SOL cap and the reserve. Nothing was sent.", workflow);
   }
@@ -311,12 +356,20 @@ async function recheck(input: ActionInput, workflow: PurchaseWorkflow): Promise<
 
 async function preparePaymentAction(input: ActionInput, workflow: PurchaseWorkflow): Promise<ExecutionResult> {
   if (!workflow.terms) return refuse(input.gate, "Payment waits for approved terms.", workflow);
-  if (input.nowMs >= Date.parse(workflow.terms.merchantExpiresAt)) {
-    return refuse(input.gate, "The approved merchant quote expired. No replacement payment was prepared.", workflow);
+  const record = input.journal.read();
+  if (record?.signedPayment || workflow.state === "payment_signed" || workflow.state === "merchant_submission_uncertain") {
+    return refuse(input.gate, "A signed or submitted payment was not refreshed.", workflow);
   }
   const fresh = await input.transports.freshTerms(workflow.terms.digest);
-  if (fresh.amountAtomic !== workflow.terms.amountAtomic || fresh.payTo !== workflow.terms.recipient || fresh.feePayer !== workflow.terms.sponsor
-    || fresh.mint !== USDC_MINT || fresh.network !== SOLANA_MAINNET_CAIP || fresh.digest !== workflow.terms.digest) {
+  const changedFields = [
+    fresh.amountAtomic !== workflow.terms.amountAtomic ? "amount" : null,
+    fresh.payTo !== workflow.terms.recipient ? "recipient" : null,
+    fresh.feePayer !== workflow.terms.sponsor ? "sponsor" : null,
+    fresh.mint !== USDC_MINT ? "mint" : null,
+    fresh.network !== SOLANA_MAINNET_CAIP ? "network" : null,
+    fresh.digest !== workflow.terms.digest ? "digest" : null,
+  ].filter((field): field is string => field != null);
+  if (changedFields.length) {
     const changed = invalidateApproval(workflow, `payment-terms-${fresh.expiresAt}`, {
       ...workflow.terms,
       amountAtomic: fresh.amountAtomic,
@@ -324,7 +377,7 @@ async function preparePaymentAction(input: ActionInput, workflow: PurchaseWorkfl
       sponsor: fresh.feePayer,
     }, new Date(input.nowMs).toISOString());
     input.journal.saveWorkflow(input.attemptId, changed.workflow);
-    return refuse(input.gate, "The merchant terms changed. Record a fresh review. Nothing was signed or sent.", changed.workflow);
+    return refuse(input.gate, `The merchant ${changedFields.join(", ")} changed. Nothing was signed or sent.`, changed.workflow);
   }
   let current = workflow;
   const nowIso = new Date(input.nowMs).toISOString();
@@ -622,7 +675,7 @@ export function createPurchaseTransports(config: AppConfig, gate: () => "off" | 
         outputMint: order.quote.outputMint,
         lookupTables: parseDisclosedLookupTables(order.lookupTables),
         lastValidBlockHeight,
-        blockhash: blockhashOf(transaction),
+        blockhash: transactionBlockhash(transaction),
         transaction,
       };
     },
@@ -726,29 +779,6 @@ export function createPurchaseTransports(config: AppConfig, gate: () => "off" | 
       return response.json();
     },
   };
-}
-
-function blockhashOf(transaction: Uint8Array): string {
-  const message = messageOf(transaction);
-  const marker = message[0] ?? 0;
-  const versioned = (marker & 128) !== 0;
-  let offset = versioned ? 4 : 3;
-  const accounts = readCompact(message, offset);
-  offset = accounts.next;
-  offset += accounts.value * 32;
-  return encodeBase58(message.subarray(offset, offset + 32));
-}
-
-function readCompact(bytes: Uint8Array, offset: number): { value: number; next: number } {
-  let value = 0;
-  let shift = 0;
-  while (offset < bytes.length) {
-    const part = bytes[offset++]!;
-    value |= (part & 127) << shift;
-    if ((part & 128) === 0) return { value, next: offset };
-    shift += 7;
-  }
-  throw new Error("The transaction account list is truncated.");
 }
 
 export function executionStatus(journal: PurchaseJournal | null): ExecutionResult {

@@ -277,7 +277,7 @@ export function DigitalPurchase({
       {visible.conversion.slippageBps != null && <div className="detail-row"><span>Slippage</span><strong>{visible.conversion.slippageBps} bps</strong></div>}
       {visible.conversion.expiresAt && <div className="detail-row"><span>Conversion expires</span><strong>{conversionExpired ? "Expired" : visible.conversion.expiresAt}</strong></div>}
       <div className="detail-row"><span>SOL cap</span><strong>{visible.spend.solDisplay ?? "Not bounded"}</strong></div>
-      <div className="detail-row"><span>Previous comparison</span><strong>0.008585479 SOL, not authorization</strong></div>
+      <div className="detail-row"><span>Owner SOL ceiling</span><strong>0.008585479 SOL for this purchase</strong></div>
       <div className="detail-row"><span>SOL reserve</span><strong>0.010000000 SOL kept back</strong></div>
       <div className="detail-row"><span>Spending review</span><strong>{visible.wallet.source === "connected" && visible.readyForApproval && !expired && !unresolved ? "Spending review only. Not an approval to pay." : "Not an approval package"}</strong></div>
       <div className="detail-row"><span>Execution gate</span><strong>{executionGate === "off" ? "Off" : "On. Spending still requires this stored approval."}</strong></div>
@@ -315,7 +315,7 @@ export function DigitalPurchase({
         {WORKFLOW_STAGES.map((stage) => <li key={stage}>{WORKFLOW_STAGE_LABELS[stage]}{serverState === stage ? " — current" : ""}</li>)}
       </ol>
       <div className="wallet-actions">
-        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "approved_terms"} onClick={() => void prepareSignature("prepare_swap")}>Prepare conversion signature</button>
+        <button className="secondary" type="button" disabled={busy || executionGate !== "on" || (serverState !== "approved_terms" && serverState !== "swap_prepared")} onClick={() => void prepareSignature("prepare_swap")}>Prepare conversion signature</button>
         <button className="secondary" type="button" disabled={busy || executionGate !== "on" || !preparedTransaction || !purpose || serverState !== "swap_prepared"} onClick={() => void signPrepared("accept_swap_signature")}>Sign conversion</button>
         <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "swap_signed"} onClick={() => void submitPrepared("submit_swap")}>Submit conversion</button>
         <button className="secondary" type="button" disabled={busy || executionGate !== "on" || serverState !== "funding_rechecked"} onClick={() => void prepareSignature("prepare_payment")}>Prepare merchant payment</button>

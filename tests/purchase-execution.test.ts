@@ -426,7 +426,7 @@ describe("purchase execution adapters", () => {
     expect(result.workflow?.terms?.conversionInputLamports).toBe(inputLamports.toString());
     expect(result.unsignedTransaction).toBeNull();
     expect(calls.send).toBe(0);
-    expect(result.error).toMatch(/fresh review/);
+    expect(result.error).toMatch(/authorized limit/);
   });
 
   it("does not rebuild or send an expired signed swap", async () => {
@@ -575,4 +575,238 @@ describe("purchase execution adapters", () => {
     expect(result.workflow?.bitcoinProof).not.toBe("confirmed");
     expect(calls.payment).toBe(1);
   });
+
+  it("binds a new synchronous order when the recorded quote is tighter than the owner SOL ceiling", async () => {
+    const calls = counters();
+    const named = "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7";
+    const sponsor = "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM";
+    const recordedInput = 8_535_674n;
+    const recordedMinimum = 1_019_894n;
+    const nextPriority = 4_000n;
+    const nextMinimum = 1_019_900n;
+    const id = "st-anchor-4ca8ae1e05b0be1e1d49a62af5756020";
+    const approved = terms({
+      wallet: named,
+      sponsor,
+      conversionInputLamports: recordedInput.toString(),
+      minimumOutputAtomic: recordedMinimum.toString(),
+      prioritizationFeeLamports: "750",
+      solCapLamports: "8541424",
+    });
+    const stored = journal();
+    stored.book.prepare({
+      id, wallet: named, idempotencyKey: id, requestUrl: bitcoinAnchorBuyUrl(digest),
+      requestBody: "", reviewedTerms: "{}", createdAt: now,
+    });
+    const workflow = acceptApproval(createReview(id, now), "approve", approved, now, nowMs).workflow;
+    expect(workflow.state).toBe("approved_terms");
+    stored.book.saveWorkflow(id, workflow);
+    const book = stored.book;
+    let quotes = 0;
+    const prepared = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: named, nowMs, journal: book,
+      transports: transports(calls, {
+        quoteSwap: async () => {
+          quotes += 1;
+          return {
+            executionMode: "sync",
+            inAmount: recordedInput.toString(),
+            outAmount: "1020000",
+            minOutAmount: nextMinimum.toString(),
+            slippageBps: 50,
+            prioritizationFeeLamports: nextPriority.toString(),
+            inputMint: WSOL_MINT,
+            outputMint: USDC_MINT,
+            lookupTables: [],
+            lastValidBlockHeight: 500,
+            blockhash: "11111111111111111111111111111111",
+            transaction: pricedSwap(named, recordedInput, 1_020_000n, nextMinimum, 20_000n),
+          };
+        },
+      }),
+    });
+    expect(prepared.error ?? "").not.toMatch(/conversion terms changed/);
+    expect(prepared.workflow?.state).toBe("swap_prepared");
+    expect(prepared.unsignedTransaction).toBeTruthy();
+    expect(prepared.workflow?.terms?.prioritizationFeeLamports).toBe(nextPriority.toString());
+    expect(prepared.workflow?.terms?.solCapLamports).toBe((recordedInput + nextPriority + 5_000n).toString());
+    expect(BigInt(prepared.workflow?.terms?.solCapLamports ?? "0")).toBeLessThanOrEqual(8_585_479n);
+    expect(book.read()?.id).toBe(id);
+    expect(book.read()?.signedSwap).toBeNull();
+    expect(calls.send).toBe(0);
+    expect(quotes).toBe(1);
+    const again = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: named, nowMs, journal: book,
+      transports: transports(calls, {
+        quoteSwap: async () => { quotes += 1; throw new Error("A retained order was quoted again."); },
+      }),
+    });
+    expect(again.workflow?.state).toBe("swap_prepared");
+    expect(again.unsignedTransaction).toBe(prepared.unsignedTransaction);
+    expect(quotes).toBe(1);
+  });
+
+  it("refreshes an expired unsigned order and refuses a signed or uncertain one", async () => {
+    const calls = counters();
+    const id = "st-anchor-refresh-unsigned1";
+    const { book } = seed(id, terms());
+    let height = 100;
+    let quotes = 0;
+    const quote = async () => {
+      quotes += 1;
+      return {
+        executionMode: "sync" as const,
+        inAmount: inputLamports.toString(),
+        outAmount: output.toString(),
+        minOutAmount: minimum.toString(),
+        slippageBps: 50,
+        prioritizationFeeLamports: priority.toString(),
+        inputMint: WSOL_MINT,
+        outputMint: USDC_MINT,
+        lookupTables: [],
+        lastValidBlockHeight: quotes === 1 ? 500 : 2_000,
+        blockhash: "11111111111111111111111111111111",
+        transaction: swapTransaction(),
+      };
+    };
+    const first = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: shopper.address, nowMs, journal: book,
+      transports: transports(calls, { quoteSwap: quote, blockHeight: async () => height }),
+    });
+    expect(first.workflow?.state).toBe("swap_prepared");
+    height = 900;
+    const refreshed = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: shopper.address, nowMs: nowMs + 1, journal: book,
+      transports: transports(calls, { quoteSwap: quote, blockHeight: async () => height }),
+    });
+    expect(refreshed.workflow?.state).toBe("swap_prepared");
+    expect(refreshed.unsignedTransaction).toBeTruthy();
+    expect(quotes).toBe(2);
+    expect(book.read()?.signedSwap).toBeNull();
+    const signed = signSlot(Buffer.from(refreshed.unsignedTransaction ?? "", "base64"), shopper, 0);
+    await runPurchaseAttempt({
+      gate: "on", action: "accept_swap_signature", attemptId: id, wallet: shopper.address, nowMs: nowMs + 2, journal: book,
+      signedTransaction: signed, transports: transports(calls),
+    });
+    const blocked = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: shopper.address, nowMs: nowMs + 3, journal: book,
+      transports: transports(calls, { quoteSwap: quote, blockHeight: async () => 50 }),
+    });
+    expect(blocked.error ?? "").toMatch(/signed or submitted/);
+    expect(quotes).toBe(2);
+    expect(calls.send).toBe(0);
+  });
+
+  it("rejects an underfunded minimum, wider slippage, spending above the owner cap, and a different wallet", async () => {
+    const calls = counters();
+    const named = "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7";
+    const sponsor = "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM";
+    const recordedInput = 8_535_674n;
+    const approved = terms({
+      wallet: named, sponsor,
+      conversionInputLamports: recordedInput.toString(),
+      minimumOutputAtomic: "1019894",
+      prioritizationFeeLamports: "750",
+      solCapLamports: "8541424",
+    });
+    const stored = journal();
+    const id = "st-anchor-bounds-check001";
+    stored.book.prepare({
+      id, wallet: named, idempotencyKey: id, requestUrl: bitcoinAnchorBuyUrl(digest),
+      requestBody: "", reviewedTerms: "{}", createdAt: now,
+    });
+    stored.book.saveWorkflow(id, acceptApproval(createReview(id, now), "approve", approved, now, nowMs).workflow);
+    const attempt = async (order: { minOutAmount: string; slippageBps: number; priority: bigint }) => runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: named, nowMs, journal: stored.book,
+      transports: transports(calls, {
+        quoteSwap: async () => ({
+          executionMode: "sync",
+          inAmount: recordedInput.toString(),
+          outAmount: "1020000",
+          minOutAmount: order.minOutAmount,
+          slippageBps: order.slippageBps,
+          prioritizationFeeLamports: order.priority.toString(),
+          inputMint: WSOL_MINT,
+          outputMint: USDC_MINT,
+          lookupTables: [],
+          lastValidBlockHeight: 500,
+          blockhash: "11111111111111111111111111111111",
+          transaction: pricedSwap(named, recordedInput, 1_020_000n, BigInt(order.minOutAmount), order.priority * 5n),
+        }),
+      }),
+    });
+    const short = await attempt({ minOutAmount: "999999", slippageBps: 50, priority: 750n });
+    expect(short.error ?? "").toMatch(/minimum USDC/);
+    expect(short.workflow?.state).toBe("approved_terms");
+    const wide = await attempt({ minOutAmount: "1019894", slippageBps: 80, priority: 750n });
+    expect(wide.error ?? "").toMatch(/slippage/);
+    const costly = await attempt({ minOutAmount: "1019894", slippageBps: 50, priority: 45_000n });
+    expect(costly.error ?? "").toMatch(/authorized limit/);
+    expect(stored.book.read()?.signedSwap).toBeNull();
+    expect(calls.send).toBe(0);
+    const other = await runPurchaseAttempt({
+      gate: "on", action: "prepare_swap", attemptId: id, wallet: shopper.address, nowMs, journal: stored.book, transports: transports(calls),
+    });
+    expect(other.error ?? "").toMatch(/wallet/);
+  });
+
+  it("refreshes an unsigned merchant quote with the same sponsor and refuses a different sponsor", async () => {
+    const calls = counters();
+    const id = "st-anchor-sponsor-refresh";
+    const sponsor = "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM";
+    const { book } = seed(id, terms({
+      sponsor,
+      conversionInputLamports: null, minimumOutputAtomic: null, slippageBps: null, prioritizationFeeLamports: "0", solCapLamports: "0",
+    }));
+    const later = Date.parse("2099-01-01T00:06:00.000Z");
+    const fresh = (feePayer: string, quotedAt: string) => parseSolanaExactTerms({
+      x402Version: 2,
+      resource: { url: bitcoinAnchorBuyUrl(digest) },
+      accepts: [{
+        scheme: "exact", network: SOLANA_MAINNET_CAIP, asset: USDC_MINT, amount: "1000000", payTo: REVIEWED_MERCHANT_RECIPIENT,
+        maxTimeoutSeconds: 300, extra: { feePayer, quotedAt },
+      }],
+    }, Date.parse(quotedAt), digest);
+    const refreshed = await runPurchaseAttempt({
+      gate: "on", action: "prepare_payment", attemptId: id, wallet: shopper.address, nowMs: later, journal: book,
+      transports: transports(calls, { freshTerms: async () => fresh(sponsor, "2099-01-01T00:06:00.000Z") }),
+    });
+    expect(refreshed.workflow?.state).toBe("payment_prepared");
+    expect(refreshed.workflow?.terms?.sponsor).toBe(sponsor);
+    expect(calls.payment).toBe(0);
+    const wrong = seed("st-anchor-wrong-sponsor1", terms({
+      sponsor,
+      conversionInputLamports: null, minimumOutputAtomic: null, slippageBps: null, prioritizationFeeLamports: "0", solCapLamports: "0",
+    }));
+    const rejected = await runPurchaseAttempt({
+      gate: "on", action: "prepare_payment", attemptId: "st-anchor-wrong-sponsor1", wallet: shopper.address, nowMs, journal: wrong.book,
+      transports: transports(calls, { freshTerms: async () => fresh(REVIEWED_FEE_PAYER, now) }),
+    });
+    expect(rejected.error ?? "").toMatch(/sponsor/);
+    expect(rejected.workflow?.terms?.sponsor).toBe(sponsor);
+    expect(calls.payment).toBe(0);
+  });
 });
+
+function pricedSwap(payer: string, inAmount: bigint, outAmount: bigint, minAmount: bigint, microLamports: bigint): Uint8Array {
+  const units = new Uint8Array(5);
+  units[0] = 2;
+  new DataView(units.buffer).setUint32(1, 200_000, true);
+  const price = new Uint8Array(9);
+  price[0] = 3;
+  new DataView(price.buffer).setBigUint64(1, microLamports, true);
+  const data = Uint8Array.from([...u64(inAmount), ...u64(outAmount), ...u64(minAmount)]);
+  return compile({
+    blockhash: "11111111111111111111111111111111",
+    accounts: [
+      { address: payer, signer: true, writable: true },
+      { address: associatedTokenAddress(payer, USDC_MINT), signer: false, writable: true },
+      ...[WSOL_MINT, USDC_MINT, DFLOW_SWAP_PROGRAM, COMPUTE_BUDGET_PROGRAM, TOKEN_PROGRAM].map((address) => ({ address, signer: false, writable: false })),
+    ],
+    instructions: [
+      { program: COMPUTE_BUDGET_PROGRAM, accounts: [], data: units },
+      { program: COMPUTE_BUDGET_PROGRAM, accounts: [], data: price },
+      { program: DFLOW_SWAP_PROGRAM, accounts: [], data },
+    ],
+  }).transaction;
+}

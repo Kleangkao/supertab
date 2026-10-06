@@ -1,6 +1,7 @@
 /** Purchase orchestration. The HTTP server does not broadcast or submit a payment. */
 import { createPublicKey, verify } from "node:crypto";
 import {
+  authorizedSolCeiling,
   certificateCorrelates,
   EXPECTED_AMOUNT_ATOMIC,
   SOL_BASE_FEE_LAMPORTS,
@@ -152,6 +153,37 @@ export function invalidateApproval(workflow: PurchaseWorkflow, eventId: string, 
   if (!difference) return step(next);
   if (workflow.state !== "review") return step({ ...next, mismatch: difference });
   return step({ ...next, state: "review", terms: null, mismatch: difference });
+}
+
+export function rebindUnsignedConversion(workflow: PurchaseWorkflow, eventId: string, nowIso: string, terms: BoundTerms): WorkflowStep {
+  const next = once(workflow, eventId, nowIso);
+  if ("workflow" in next) return next;
+  if (workflow.state !== "approved_terms" && workflow.state !== "swap_prepared") {
+    return step({ ...next, mismatch: "A signed or submitted conversion was not refreshed." });
+  }
+  if (!workflow.terms) return step({ ...next, mismatch: "This approval does not include a conversion." });
+  const identity: (keyof BoundTerms)[] = ["wallet", "network", "productId", "digest", "amountAtomic", "recipient", "sponsor", "reserveLamports"];
+  const changed = identity.filter((field) => workflow.terms?.[field] !== terms[field]);
+  if (changed.length) return step({ ...next, mismatch: `Approval no longer matches: ${changed.join(", ")}.` });
+  const incoherent = conversionCapIsCoherent(terms);
+  if (incoherent) return step({ ...next, mismatch: incoherent });
+  if (BigInt(terms.solCapLamports) > authorizedSolCeiling(workflow.terms)) {
+    return step({ ...next, mismatch: "The conversion costs more SOL than the authorized limit." });
+  }
+  if (terms.minimumOutputAtomic == null || BigInt(terms.minimumOutputAtomic) < EXPECTED_AMOUNT_ATOMIC) {
+    return step({ ...next, mismatch: "The minimum USDC does not cover 1.000000 USDC." });
+  }
+  if (workflow.terms.slippageBps != null && (terms.slippageBps == null || terms.slippageBps > workflow.terms.slippageBps)) {
+    return step({ ...next, mismatch: "The conversion slippage is above the approved slippage." });
+  }
+  return step({
+    ...next,
+    state: "approved_terms",
+    mismatch: null,
+    retainedMessage: null,
+    lifetimeExpired: false,
+    terms: { ...terms, blockhash: null, lastValidBlockHeight: null },
+  });
 }
 
 export function prepareSwap(workflow: PurchaseWorkflow, eventId: string, nowIso: string, input: {

@@ -1,10 +1,20 @@
 # SuperTab project state
 
+## Bound unsigned conversion — October 6, 2026
+
+The same unpaid attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` is now `swap_prepared`. Wallet `JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7`, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, sponsor `D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM`, and exactly 1.000000 USDC are unchanged. No swap or merchant transaction has been signed or submitted. The original reviewed terms remain in the journal.
+
+The recorded review was input 8,535,674 lamports, minimum 1,019,894 USDC base units, slippage 50 bps, priority 750 lamports, and quoted cost 8,541,424 lamports. That quoted cost had been stored as the cap. The checked unsigned order was discarded, so preparation asked DFlow for a second synchronous order and required its minimum to be at least 1,019,894. The first live order after the fix had the same input, slippage 50, priority 311, and total cost 8,540,985 lamports, all inside that recorded quote. Its minimum was 1,019,379, which is 515 base units below the recorded minimum and still above the 1,000,000 USDC payment. That minimum was the field the old prepare rejected. The owner ceiling stays 8,585,479 lamports; the lower recorded quote does not replace it.
+
+Preparation now retains the synchronous unsigned order on this attempt. A later prepare reuses it while the blockhash is valid. If that unsigned order expires, the same attempt can bind another synchronous order only when the wallet, recipient, sponsor, product, and 1 USDC amount are unchanged, slippage is not wider, the minimum still covers 1 USDC, and the total SOL cost stays at or below 8,585,479 lamports. Signed, submitted, and uncertain attempts are not refreshed. A changed sponsor, recipient, mint, or wallet is refused by name.
+
+The live `POST /api/digital-purchase/execute` action `prepare_swap` reached `swap_prepared` with a usable unsigned transaction. The order currently bound is synchronous: input 8,535,674 lamports, minimum 1,018,920 USDC base units, slippage 50 bps, priority 400 lamports, total cost 8,541,074 lamports, and last valid block height 431,849,182. The wallet balance read was 57,052,346 lamports, which covers that cost plus the 0.01 SOL reserve. The blockhash lifetime is short, so the owner clicks **Prepare conversion signature** and then **Sign conversion** on the purpose line that appears. That signature is the SOL to USDC conversion only. It does not pay the merchant. The local gate is enabled for this attempt.
+
+Fixture tests: 201 passed, 7 skipped. Typecheck, changed-file lint, and the production build passed. This is not a signature, not settlement, and not a certificate.
+
 ## Authorized preparation attempt — October 6, 2026
 
-The owner authorized one 1 USDC Bitcoin Anchor purchase for the connected wallet, with the named sponsor and a maximum total SOL spend of 0.008585479 SOL, preserving 0.01 SOL. An unpaid review at 0.008541424 SOL was recorded as approved terms. The local execution gate was briefly enabled for unsigned preparation, which refused changed conversion terms. No transaction was signed or sent. The gate was disabled again.
-
-Swap validation now permits higher minimum output or lower priority fees within the original recorded cap, while retaining exact input, mints, and slippage. Both unsigned preparation and signed validation use the same bounds. A live retry remained blocked; live quotes must not be presented as an executed conversion. 197 tests passed, 7 skipped; typecheck and changed-file lint passed. The recorded attempt is still approved and unsubmitted; do not erase it or create a replacement payment.
+The owner authorized one 1 USDC Bitcoin Anchor purchase for the connected wallet, with the named sponsor and a maximum total SOL spend of 0.008585479 SOL, preserving 0.01 SOL. An unpaid review at 0.008541424 SOL was recorded as approved terms. The local execution gate was briefly enabled for unsigned preparation, which refused changed conversion terms. No transaction was signed or sent. The gate was disabled again. The section above is the later bound order for that same attempt.
 
 ## Fresh sponsor reviews and status reads — October 6, 2026
 

@@ -29,6 +29,9 @@ export const REVIEWED_MERCHANT_RECIPIENT = "DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCY
 export const REVIEWED_FEE_PAYER = "BFK9TLC3edb13K6v4YyH3DwPb5DSUpkWvb7XnqCL9b4F";
 /** Browser comparison from 2026-10-05T14:39:47Z. Not a spending authorization. */
 export const PREVIOUS_SOL_CAP_LAMPORTS = 8_585_479n;
+/** Owner ceiling for the one authorized Bitcoin Anchor purchase. A lower recorded quote does not replace it. */
+export const AUTHORIZED_PURCHASE_WALLET = "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7";
+export const AUTHORIZED_PURCHASE_SPONSOR = "D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM";
 export const MAINNET_WALLET_CHAIN = "solana:mainnet";
 
 export class DigitalPurchaseError extends Error {
@@ -237,6 +240,26 @@ export function reviewStillBound(input: {
     && input.reviewAddress === input.currentAddress
     && input.reviewNetwork === input.currentNetwork
     && input.currentNetwork === MAINNET_WALLET_CHAIN;
+}
+
+export function authorizedSolCeiling(terms: {
+  productId: string;
+  amountAtomic: string;
+  wallet: string;
+  recipient: string;
+  sponsor: string;
+  solCapLamports: string;
+  reserveLamports: string;
+}): bigint {
+  const recorded = BigInt(terms.solCapLamports);
+  const thisPurchase = terms.productId === BITCOIN_ANCHOR_PRODUCT.productId
+    && terms.amountAtomic === EXPECTED_AMOUNT_ATOMIC.toString()
+    && terms.wallet === AUTHORIZED_PURCHASE_WALLET
+    && terms.recipient === REVIEWED_MERCHANT_RECIPIENT
+    && terms.sponsor === AUTHORIZED_PURCHASE_SPONSOR
+    && terms.reserveLamports === DEFAULT_SOL_RESERVE_LAMPORTS.toString()
+    && recorded <= PREVIOUS_SOL_CAP_LAMPORTS;
+  return thisPurchase ? PREVIOUS_SOL_CAP_LAMPORTS : recorded;
 }
 
 export function compareSolCap(currentLamports: bigint): {

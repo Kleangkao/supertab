@@ -27,6 +27,7 @@ export interface SwapContext {
   lookupTables: { address: string; addresses: Record<string, string> }[];
   lastValidBlockHeight: number;
   blockhash: string;
+  unsignedTransaction?: string;
 }
 
 export interface StoredMerchantResponse {
@@ -190,6 +191,17 @@ export class PurchaseJournal {
       if (record.state !== "prepared" || record.paymentAuthorization !== null) throw new Error("Cannot replace the original payment authorization.");
       if (!authorization || authorization.length > 100_000) throw new Error("Invalid payment authorization.");
       return { ...record, state: "authorization_retained", paymentAuthorization: authorization };
+    });
+  }
+  retainCheckedSwap(id: string, context: SwapContext & { unsignedTransaction: string }): void {
+    if (!context.unsignedTransaction || context.executionMode !== "sync") throw new Error("Only a synchronous unsigned order can be retained.");
+    this.update(() => {
+      const record = this.match(id);
+      if (record.signedSwap || record.swapSubmission || record.signedPayment) throw new Error("A signed or submitted conversion was not refreshed.");
+      if (record.workflow && record.workflow.state !== "review" && record.workflow.state !== "approved_terms" && record.workflow.state !== "swap_prepared") {
+        throw new Error("A signed or submitted conversion was not refreshed.");
+      }
+      return { ...record, swapContext: context };
     });
   }
   refreshUnsignedReview(id: string, reviewedTerms: string, unsignedPayment: string): void {
