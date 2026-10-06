@@ -40,8 +40,8 @@ export function revalidateSignedSwap(input: {
   context: SwapContext;
   approved: BoundTerms;
 }): void {
-  if (input.context.executionMode !== "sync" && input.context.executionMode !== "async") {
-    throw new Error("DFlow did not name a supported execution mode.");
+  if (input.context.executionMode !== "sync") {
+    throw new Error("An async swap is not signed for this purchase.");
   }
   if (input.context.inputMint !== WSOL_MINT || input.context.outputMint !== USDC_MINT) {
     throw new Error("The swap mints do not match the approval.");
@@ -73,7 +73,7 @@ export function revalidateSignedSwap(input: {
     lookupTables: tables,
     prioritizationFeeLamports: BigInt(input.context.prioritizationFeeLamports),
     executionMode: input.context.executionMode,
-    allowAsync: true,
+    allowAsync: false,
   });
   if (checked.status !== "checked") throw new Error(checked.explanation);
 }

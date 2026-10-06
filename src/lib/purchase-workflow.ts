@@ -135,7 +135,11 @@ export function acceptApproval(workflow: PurchaseWorkflow, eventId: string, term
   }
   if (workflow.terms) {
     const difference = materialDifference(workflow.terms, terms);
-    if (difference) return step({ ...next, state: "review", terms: null, mismatch: difference });
+    if (difference) {
+      if (workflow.state !== "review") return step({ ...next, mismatch: difference });
+      return step({ ...next, state: "review", terms: null, mismatch: difference });
+    }
+    if (workflow.state !== "review") return step({ ...next, mismatch: null });
   }
   return step({ ...next, state: "approved_terms", terms, mismatch: null, quoteExpired: false });
 }
@@ -146,9 +150,7 @@ export function invalidateApproval(workflow: PurchaseWorkflow, eventId: string, 
   if (!workflow.terms) return step(next);
   const difference = materialDifference(workflow.terms, nextTerms);
   if (!difference) return step(next);
-  if (isUnresolvedWorkflow(workflow.state)) {
-    return step({ ...next, mismatch: difference });
-  }
+  if (workflow.state !== "review") return step({ ...next, mismatch: difference });
   return step({ ...next, state: "review", terms: null, mismatch: difference });
 }
 

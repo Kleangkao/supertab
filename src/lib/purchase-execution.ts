@@ -153,6 +153,9 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
     amount: BigInt(workflow.terms.conversionInputLamports),
     slippageBps: workflow.terms.slippageBps,
   });
+  if (order.executionMode !== "sync") {
+    return refuse(input.gate, "DFlow returned an async order. This purchase signs only a synchronous route. Nothing was signed or sent.", workflow);
+  }
   if (!sameFinancialSwap(order, workflow.terms)) {
     const changed = invalidateApproval(workflow, `swap-terms-${input.nowMs}`, { ...workflow.terms, conversionInputLamports: order.inAmount }, new Date(input.nowMs).toISOString());
     input.journal.saveWorkflow(input.attemptId, changed.workflow);
@@ -169,7 +172,7 @@ async function prepareSwapAction(input: ActionInput, workflow: PurchaseWorkflow)
     lookupTables: order.lookupTables,
     prioritizationFeeLamports: BigInt(order.prioritizationFeeLamports),
     executionMode: order.executionMode,
-    allowAsync: true,
+    allowAsync: false,
   });
   if (unsigned.status !== "checked") return refuse(input.gate, unsigned.explanation, workflow);
   const height = await input.transports.blockHeight();
@@ -412,8 +415,26 @@ async function submitPaymentAction(input: ActionInput, workflow: PurchaseWorkflo
   const record = input.journal.read();
   if (!record?.paymentAuthorization || !workflow.terms) return refuse(input.gate, "The original payment authorization is not in custody.", workflow);
   if (replay) {
-    if (workflow.state !== "merchant_submission_uncertain" || record.merchantResponse) {
+    if (workflow.state !== "merchant_submission_uncertain") {
       return refuse(input.gate, "Replay is only for the original payment whose response was lost.", workflow);
+    }
+    const knownSettlement = record.merchantResponse?.settlementTx ?? workflow.settlementTx;
+    if (knownSettlement) return settleAndVerify(input, workflow, knownSettlement, record.merchantResponse?.certId ?? workflow.certId);
+    if (record.merchantResponse) return reconcilePayment(input, workflow);
+    if (!record.signedPayment || !workflow.retainedMessage || !workflow.paymentMemo) {
+      return refuse(input.gate, "The original payment authorization is not in custody.", workflow);
+    }
+    let signed: Buffer;
+    try {
+      const body = JSON.parse(record.paymentAuthorization) as { payload?: { transaction?: string } };
+      if (body.payload?.transaction !== record.signedPayment) throw new Error("The stored authorization does not match the signed payment.");
+      signed = Buffer.from(record.signedPayment, "base64");
+      assertSponsoredPayment({
+        signed, retainedMessage: Buffer.from(workflow.retainedMessage, "base64"),
+        shopper: workflow.terms.wallet, recipient: workflow.terms.recipient, sponsor: workflow.terms.sponsor,
+      });
+    } catch (error) {
+      return refuse(input.gate, error instanceof Error ? error.message : "The stored payment was rejected.", workflow);
     }
     if (Date.now() - Date.parse(record.createdAt) > 24 * 60 * 60 * 1000) return refuse(input.gate, "The documented idempotency window has passed. No replacement payment was created.", workflow);
     return deliver(input, workflow, record.paymentAuthorization, record.idempotencyKey);
@@ -582,14 +603,14 @@ export function createPurchaseTransports(config: AppConfig, gate: () => "off" | 
     async quoteSwap(quote) {
       const order = await fetchConversionOrder({
         inputMint: WSOL_MINT, outputMint: USDC_MINT, amount: quote.amount, userPublicKey: quote.wallet, wrapAndUnwrapSol: true,
-      }, { baseUrl: config.dflowBaseUrl, apiKey: config.dflowApiKey ?? undefined, slippageBps: quote.slippageBps, fetchImpl });
+      }, { baseUrl: config.dflowBaseUrl, apiKey: config.dflowApiKey ?? undefined, slippageBps: quote.slippageBps, fetchImpl, syncOnly: true });
       const lastValidBlockHeight = order.quote.lastValidBlockHeight;
       if (!order.transactionBase64 || !order.quote.executionMode || lastValidBlockHeight == null || order.quote.prioritizationFeeLamports == null || order.quote.slippageBps == null) {
         throw new DigitalPurchaseError("DFlow did not return a submittable order.");
       }
       const transaction = decodeTransaction(order.transactionBase64);
       if (!transaction) throw new DigitalPurchaseError("DFlow returned a transaction that could not be read.");
-      if (order.quote.executionMode !== "sync" && order.quote.executionMode !== "async") throw new DigitalPurchaseError("DFlow returned an unsupported execution mode.");
+      if (order.quote.executionMode !== "sync") throw new DigitalPurchaseError("DFlow did not return a synchronous order. Nothing was signed or sent.");
       return {
         executionMode: order.quote.executionMode,
         inAmount: order.quote.inAmount.toString(),

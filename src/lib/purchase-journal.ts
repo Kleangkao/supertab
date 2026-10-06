@@ -195,6 +195,8 @@ export class PurchaseJournal {
   refreshUnsignedReview(id: string, reviewedTerms: string, unsignedPayment: string): void {
     this.update(() => {
       const record = this.match(id);
+      if (record.workflow && record.workflow.state !== "review") throw new Error("Cannot refresh an approved attempt.");
+      if (record.signedSwap || record.swapSubmission) throw new Error("Cannot refresh an approved attempt.");
       if (record.state !== "prepared" || record.paymentAuthorization) throw new Error("Cannot refresh a submitted or authorized attempt.");
       return { ...record, reviewedTerms, unsignedPayment };
     });

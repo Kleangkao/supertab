@@ -110,11 +110,12 @@ describe("purchase workflow fixtures", () => {
     expect(refused.retryPayment).toBe(false);
   });
 
-  it("drops approval when the wallet, amount, recipient, or sponsor changes", () => {
+  it("keeps an approved sponsor when a later quote names a different one", () => {
     const current = approved();
-    const changed = invalidateApproval(current, "wallet", terms({ wallet: "other-wallet" }), now);
-    expect(changed.workflow.state).toBe("review");
-    expect(changed.workflow.terms).toBeNull();
+    const changed = invalidateApproval(current, "wallet", terms({ sponsor: "different-sponsor" }), now);
+    expect(changed.workflow.state).toBe("approved_terms");
+    expect(changed.workflow.terms?.sponsor).toBe(current.terms?.sponsor);
+    expect(changed.workflow.mismatch).toMatch(/sponsor/);
     expect(changed.retryPayment).toBe(false);
     const expired = acceptApproval(createReview("attempt-1", now), "stale", terms({ merchantExpiresAt: "2000-01-01T00:00:00.000Z" }), now, nowMs);
     expect(expired.workflow.quoteExpired).toBe(true);

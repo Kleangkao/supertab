@@ -39,6 +39,8 @@ export interface DflowClientOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   now?: () => number;
+  /** Ask DFlow for a synchronous route. An async response is still rejected by the purchase adapter. */
+  syncOnly?: boolean;
 }
 
 export function solanaTransactionSummary(encoded: string): {
@@ -400,6 +402,10 @@ export async function fetchConversionOrder(
   if (input.userPublicKey) {
     params.set("userPublicKey", input.userPublicKey);
     params.set("includeAddressLookupTables", "true");
+  }
+  if (options.syncOnly) {
+    params.set("allowSyncExec", "true");
+    params.set("allowAsyncExec", "false");
   }
   const headers: Record<string, string> = { accept: "application/json" };
   if (options.apiKey) headers["x-api-key"] = options.apiKey;

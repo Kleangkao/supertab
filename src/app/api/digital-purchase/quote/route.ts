@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       const id = review.recovery.idempotencyKey;
       const journal = localPurchaseJournal(id);
       const stored = journal.read();
-      if (stored && (stored.wallet !== review.wallet.address || stored.requestUrl !== review.terms.resourceUrl || stored.state !== "prepared")) {
+      if (stored && (stored.wallet !== review.wallet.address || stored.requestUrl !== review.terms.resourceUrl || stored.state !== "prepared" || (stored.workflow && stored.workflow.state !== "review"))) {
         throw new DigitalPurchaseError("An existing purchase attempt needs recovery. No new payment was prepared.");
       }
       const rpc = await fetch(readConfig().solanaRpcUrl, {

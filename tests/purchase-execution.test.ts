@@ -154,6 +154,18 @@ function seed(id: string, approved: BoundTerms): { book: PurchaseJournal; path: 
 }
 
 describe("purchase execution adapters", () => {
+  it("requests a synchronous DFlow route and does not spend while the gate is off", async () => {
+    let requested = "";
+    const live = createPurchaseTransports({
+      solanaRpcUrl: "https://rpc.example", dflowBaseUrl: "https://dflow.example", dflowApiKey: null, dflowSlippageBps: 50,
+    } as never, () => "off", async (input) => {
+      requested = String(input);
+      return new Response(JSON.stringify({ executionMode: "async" }), { status: 200 });
+    });
+    await expect(live.quoteSwap({ wallet: shopper.address, amount: inputLamports, slippageBps: 50 })).rejects.toThrow(/DFlow/);
+    expect(requested).toContain("allowSyncExec=true");
+    expect(requested).toContain("allowAsyncExec=false");
+  });
   it("makes no spending call when the gate is off", async () => {
     const calls = counters();
     const { book } = seed("st-anchor-gate-off-test", terms());
@@ -239,7 +251,7 @@ describe("purchase execution adapters", () => {
     expect(result.error).toMatch(/stays in the wallet/);
   });
 
-  it("does not treat an async chain landing as a fill", async () => {
+  it("rejects an async DFlow order before signing", async () => {
     const calls = counters();
     const id = "st-anchor-async-order-test";
     const { book } = seed(id, terms());
@@ -249,21 +261,11 @@ describe("purchase execution adapters", () => {
     const prepared = await runPurchaseAttempt({
       gate: "on", action: "prepare_swap", attemptId: id, wallet: shopper.address, nowMs, journal: book, transports: quote,
     });
-    const signed = signSlot(Buffer.from(prepared.unsignedTransaction ?? "", "base64"), shopper, 0);
-    await runPurchaseAttempt({
-      gate: "on", action: "accept_swap_signature", attemptId: id, wallet: shopper.address, nowMs, journal: book, signedTransaction: signed, transports: quote,
-    });
-    const signature = (await import("../src/lib/swap-adapter")).transactionSignature(signed, 0);
-    const pending = await runPurchaseAttempt({
-      gate: "on", action: "submit_swap", attemptId: id, wallet: shopper.address, nowMs, journal: book,
-      transports: transports(calls, {
-        sendSwap: async () => { calls.send += 1; return signature; },
-        orderStatus: async () => { calls.order += 1; return { status: "pending", outAmount: "0" }; },
-      }),
-    });
-    expect(calls.send).toBe(1);
-    expect(pending.workflow?.state).toBe("swap_submitted_uncertain");
-    expect(pending.error).toMatch(/async/i);
+    expect(prepared.workflow?.state).toBe("approved_terms");
+    expect(prepared.unsignedTransaction).toBeNull();
+    expect(calls.send).toBe(0);
+    expect(prepared.error).toMatch(/synchronous/);
+    expect(book.read()?.signedSwap).toBeNull();
   });
 
   it("rejects an altered swap and a payment signed in the sponsor slot", async () => {
@@ -364,6 +366,37 @@ describe("purchase execution adapters", () => {
     });
     expect(submissions).toBe(1);
     expect(replay.retryPayment).toBe(false);
+    const explicitReplay = await runPurchaseAttempt({
+      gate: "on", action: "replay_payment", attemptId: id, wallet: shopper.address, nowMs, journal: book,
+      transports: transports(calls, { submitPayment: async () => { submissions += 1; throw new Error("replay submitted a second payment"); } }),
+    });
+    expect(submissions).toBe(1);
+    expect(explicitReplay.retryPayment).toBe(false);
+  });
+
+  it("keeps approved terms when a refreshed sponsor differs", async () => {
+    const calls = counters();
+    const id = "st-anchor-sponsor-keep1";
+    const approved = terms({
+      conversionInputLamports: null, minimumOutputAtomic: null, slippageBps: null, prioritizationFeeLamports: "0", solCapLamports: "0",
+    });
+    const { book } = seed(id, approved);
+    const result = await runPurchaseAttempt({
+      gate: "on", action: "prepare_payment", attemptId: id, wallet: shopper.address, nowMs, journal: book,
+      transports: transports(calls, {
+        freshTerms: async () => {
+          const quoted = freshTerms();
+          return { ...quoted, feePayer: shopper.address };
+        },
+      }),
+    });
+    expect(calls.payment).toBe(0);
+    expect(result.unsignedTransaction).toBeNull();
+    expect(result.workflow?.state).toBe("approved_terms");
+    expect(result.workflow?.terms?.sponsor).toBe(REVIEWED_FEE_PAYER);
+    expect(book.read()?.workflow?.terms?.sponsor).toBe(REVIEWED_FEE_PAYER);
+    expect(() => book.refreshUnsignedReview(id, "rewritten-sponsor", "replacement-preview")).toThrow(/approved/);
+    expect(book.read()?.reviewedTerms).not.toBe("rewritten-sponsor");
   });
 
   it("drops a changed conversion quote without signing or sending", async () => {
@@ -379,7 +412,8 @@ describe("purchase execution adapters", () => {
         }),
       }),
     });
-    expect(result.workflow?.state).toBe("review");
+    expect(result.workflow?.state).toBe("approved_terms");
+    expect(result.workflow?.terms?.conversionInputLamports).toBe(inputLamports.toString());
     expect(result.unsignedTransaction).toBeNull();
     expect(calls.send).toBe(0);
     expect(result.error).toMatch(/fresh review/);
@@ -459,6 +493,20 @@ describe("purchase execution adapters", () => {
     const restarted = new PurchaseJournal(path, Buffer.alloc(32, 7));
     expect(restarted.read()?.state).toBe("outcome_unknown");
     expect(restarted.read()?.workflow?.state).toBe("merchant_submission_uncertain");
+    const replayed = await runPurchaseAttempt({
+      gate: "on", action: "replay_payment", attemptId: id, wallet: shopper.address, nowMs, journal: book,
+      transports: transports(calls, {
+        submitPayment: async (payment) => {
+          submissions += 1;
+          expect(payment.idempotencyKey).toBe(id);
+          expect(payment.authorization).toContain(Buffer.from(signed).toString("base64"));
+          throw new SwapSubmissionLost();
+        },
+      }),
+    });
+    expect(submissions).toBe(2);
+    expect(replayed.workflow?.state).toBe("merchant_submission_uncertain");
+    expect(replayed.retryPayment).toBe(false);
   });
 
   it("does not treat a different valid certificate as this purchase", async () => {
