@@ -171,9 +171,9 @@ Financial execution stays fail-closed when `SUPERTAB_MAINNET_EXECUTION` is unset
 npx wrangler deploy --config merchant/wrangler.jsonc
 ```
 
-`merchant/wrangler.jsonc` migration tag `v1` creates `DevnetMerchantObject`, `ShoppingSessionObject`, and `GeminiBudgetObject`. If Cloudflare rejects that tag because `v1` is already applied, stop. Add a new tag that creates only the missing classes. Do not drop `DevnetMerchantObject` or reset its storage.
+`merchant/wrangler.jsonc` in commit `224737026af70d90771b4f8b885c06dee4e8d9ec` is already the migration to deploy. The hosted Worker has applied tag `v1` since 2026-10-06, and that tag already created `DevnetMerchantObject`, `ShoppingSessionObject`, and `GeminiBudgetObject`. Wrangler sends no new migration when the remote tag is already the last local tag. Do not add `v2`. Do not delete, rename, or recreate those classes. Their namespace ids stayed the same from Worker version 1 through the deployed version `653de8e6-3fdd-45ac-bbba-631e23ac38c7`.
 
-Set Worker secrets in the Cloudflare dashboard or with `npx wrangler secret put`, from `merchant/`, for `SUPERTAB_CONTROL_TOKEN` and `MERCHANT_KEY_JSON`. Do not pass secret values on the command line in chat or commit them. `GEMINI_DAILY_LIMIT` is already a non-secret var (`120`). Leave `MERCHANT_SNAPSHOT` unset unless you are intentionally importing an empty ledger snapshot through the existing guarded route.
+Do not rotate secrets. The Worker already has `SUPERTAB_CONTROL_TOKEN`, `MERCHANT_KEY_JSON`, and `SOLANA_DEVNET_RPC_URL`. `GEMINI_DAILY_LIMIT` is already the plain value `120`. `MERCHANT_SNAPSHOT` is not set.
 
 3. Confirm the hosted health contract before deploying the app:
 
@@ -216,3 +216,15 @@ npx wrangler rollback <previous-deployment-id> --config merchant/wrangler.jsonc
 - New app against an old Worker fails closed with 503 for remote shopping snapshots. Fix it by finishing the new Worker deploy, not by removing the revision check.
 
 Snapshots already stored with revision fields stay on disk. An older Worker does not enforce compare-and-swap on them. Local Wrangler checks do not prove hosted atomicity.
+
+## Hosted result — 2026-10-08
+
+These commands were run for commit `224737026af70d90771b4f8b885c06dee4e8d9ec`. Do not repeat them unless rolling forward again.
+
+- Worker version: `653de8e6-3fdd-45ac-bbba-631e23ac38c7`. Tag `v1`. No new migration. Namespace ids unchanged: `MERCHANT` `c68fb2bb29ea4a56b3624f107e14a768`, `SESSIONS` `276bc81f9bee4d4ea26c9a8106470c72`, `GEMINI_BUDGET` `159604bd95754a30af7182afebd3a659`.
+- Worker secret names still present: `SUPERTAB_CONTROL_TOKEN`, `MERCHANT_KEY_JSON`, `SOLANA_DEVNET_RPC_URL`. None were rotated. `GEMINI_DAILY_LIMIT` remains `120`.
+- App deployment: `dpl_4r9KEEKV1dPDwHeHig4QW9DEZu3u` at https://supertab-main.vercel.app. Previous production deployment, for rollback: `dpl_G4LmqhwqQa6GAtMUKqBtJpdNRunr`. Worker code rollback target: `302b2f9d-6a3c-45a2-8a8f-9a99a48acc2a`.
+- Production env names do not include `SUPERTAB_MAINNET_EXECUTION`, `SUPERTAB_SHOP_FIXTURES`, or `SUPERTAB_ALLOW_SHOP_FIXTURES`. The health field `financialExecution: "disabled"` is still a fixed label and is not the gate.
+- Disposable session `b287de81-8f34-4d6c-9103-18cee101e502`: create 200, competing updates 200 and 409, restore 200 with the winning requirements and no balances, quote, approval, or unsigned transaction, delete 200, then 404. A headerless Worker PUT was not run because the production control token cannot be read back.
+- Public browser: live Shopify and eBay search, budget edit to $40, shortlist, lowest-item comparison, and reload restore. No fixture merchant. No signature, swap, payment, or purchase execute call.
+- Shopify catalog links labeled “Open merchant page” were cart permalinks (`/cart/<variant>:<quantity>`). That wording is fixed after this hosted deploy and is not in `dpl_4r9KEEKV1dPDwHeHig4QW9DEZu3u`. Do not deploy the wording fix without a separate authorization.
