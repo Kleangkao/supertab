@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { requirementMessage, type RequirementChange } from "@/lib/constraints";
+import { merchantHandoffLinks } from "@/lib/offers";
 import { addToShortlist, clearShortlist, itemPriceNote, loadShortlist, removeFromShortlist, type ShortlistItem } from "@/lib/shortlist";
 import type { ConstraintView, OfferView } from "@/lib/view";
 
@@ -100,6 +101,8 @@ export function toShortlistItem(offer: OfferView, savedAt: string): ShortlistIte
     currency: offer.currency,
     shippingDisplay: offer.shippingDisplay,
     shippingSummary: offer.shippingSummary,
+    productUrl: offer.productUrl,
+    merchantCartUrl: offer.merchantCartUrl,
     merchantReviewUrl: offer.merchantReviewUrl,
     verifiedAt: offer.verifiedAt,
     savedAt,
@@ -149,13 +152,23 @@ export function ShortlistPanel({ currentIds, onReview, onRefind }: {
           <p className="price-note">Snapshot from {item.verifiedAt || "an unknown time"}. Saved {item.savedAt}.</p>
           {current ? <button className="primary" type="button" onClick={() => onReview(item.id)}>Review this result</button> : <p className="inline-error">Not in this search, so it cannot reopen the funding review.</p>}
           {!current && <button className="secondary" type="button" onClick={() => onRefind(item.title)}>Look for this product again</button>}
-          {item.merchantReviewUrl && <a href={item.merchantReviewUrl} target="_blank" rel="noopener noreferrer">Open merchant page. This does not pay or place an order.</a>}
+          <MerchantHandoffLinks productUrl={item.productUrl} cartUrl={item.merchantCartUrl} otherUrl={item.merchantReviewUrl} />
           <button className="secondary" type="button" onClick={() => { const storage = browserStorage(); if (!storage) return; removeFromShortlist(storage, item.id); window.dispatchEvent(new Event("supertab-shortlist")); }}>Remove from shortlist</button>
         </div>
       </article>;
     })}</div>
     <p className="section-copy" role="status">{itemPriceNote(items)}</p>
   </section>;
+}
+
+export function MerchantHandoffLinks({ productUrl, cartUrl, otherUrl }: {
+  productUrl?: string | null;
+  cartUrl?: string | null;
+  otherUrl?: string | null;
+}) {
+  const links = merchantHandoffLinks({ productUrl, cartUrl, otherUrl });
+  if (links.length === 0) return null;
+  return <>{links.map((link) => <a className="merchant-handoff" key={`${link.kind}:${link.href}`} href={link.href} target="_blank" rel="noopener noreferrer">{link.label}</a>)}</>;
 }
 
 export function saveOffer(offer: OfferView): string {

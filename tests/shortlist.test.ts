@@ -18,7 +18,8 @@ function item(id: string, overrides: Partial<ShortlistItem> = {}): ShortlistItem
     id, source: "shopify", sourceItemId: id, merchant: "Fixture", title: `Product ${id}`,
     variantLabel: "S", condition: "new", availability: "in_stock",
     priceDisplay: "$27.00", priceMinor: "2700", currency: "USD",
-    shippingDisplay: null, shippingSummary: null, merchantReviewUrl: "https://merchant.test/p",
+    shippingDisplay: null, shippingSummary: null, productUrl: "https://merchant.test/products/p",
+    merchantCartUrl: null, merchantReviewUrl: "https://merchant.test/p",
     verifiedAt: "2026-10-08T00:00:00.000Z", savedAt: "2026-10-08T00:00:00.000Z",
     ...overrides,
   };

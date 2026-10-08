@@ -156,11 +156,14 @@ test("a failed request keeps the draft and the current results", async ({ page }
 test("merchant handoff does not claim payment or an order", async ({ page }) => {
   await search(page, "Find me a black polo under $50");
   const card = exactCard(page, "Black Torrey Polo");
-  const handoff = card.getByRole("link", { name: "Open merchant page. This does not pay or place an order." });
-  await expect(handoff).toHaveAttribute("href", /https:\/\/merchant\.test\//);
-  expect((await handoff.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const product = card.getByRole("link", { name: "Open product page. This does not pay or place an order." });
+  const cart = card.getByRole("link", { name: "Continue to merchant cart. This does not pay or place an order." });
+  await expect(product).toHaveAttribute("href", "https://merchant.test/products/black-polo");
+  await expect(cart).toHaveAttribute("href", "https://merchant.test/cart/1:1");
+  expect((await product.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect((await cart.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await card.getByRole("button", { name: "Review purchase" }).click();
-  const merchant = page.getByRole("link", { name: "Check price & delivery" });
+  const merchant = page.getByRole("region", { name: "Merchant checkout total" }).getByRole("link", { name: "Continue to merchant cart. This does not pay or place an order." });
   await expect(merchant).toBeVisible();
   expect((await merchant.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await expect(page.getByText("You’ll review checkout at the merchant. Opening it sends no payment.")).toBeVisible();

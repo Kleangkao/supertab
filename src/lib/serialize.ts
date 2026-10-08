@@ -1,5 +1,5 @@
 import { formatFixedMinor, formatMinor, formatUsdFromMinor } from "./money";
-import { merchantReviewUrl, payableAuthorityOf, type NormalizedOffer, type PayableSnapshot } from "./offers";
+import { merchantHandoffLinks, merchantReviewUrl, payableAuthorityOf, type NormalizedOffer, type PayableSnapshot } from "./offers";
 import type { MerchantStatement } from "./merchant-checkout";
 import type { AssetBalance } from "./tokens";
 import type { FundingPlan } from "./funding-planner";
@@ -8,15 +8,19 @@ import { priceImpactPercentLabel } from "./dflow";
 import type { AssetView, CheckoutView, FundingView, OfferView, PurchaseView } from "./view";
 
 export function toOfferView(offer: NormalizedOffer, quantity = 1): OfferView {
-  let reviewUrl = merchantReviewUrl(offer.checkout.kind === "merchant_cart_link" ? offer.checkout.url : offer.productUrl);
-  if (reviewUrl && offer.source === "shopify" && offer.checkout.kind === "merchant_cart_link") {
-    const url = new URL(reviewUrl);
+  let cartUrl = offer.checkout.kind === "merchant_cart_link" ? merchantReviewUrl(offer.checkout.url) : null;
+  if (cartUrl && offer.source === "shopify" && offer.checkout.kind === "merchant_cart_link") {
+    const url = new URL(cartUrl);
     const variant = offer.sourceItemId.match(/^gid:\/\/shopify\/ProductVariant\/(\d+)$/)?.[1];
     if (variant && url.pathname === `/cart/${variant}:1` && Number.isInteger(quantity) && quantity > 0 && quantity <= 20) {
       url.pathname = `/cart/${variant}:${quantity}`;
-      reviewUrl = url.href;
+      cartUrl = url.href;
     }
   }
+  const handoff = merchantHandoffLinks({ productUrl: offer.productUrl, cartUrl });
+  const productUrl = handoff.find((link) => link.kind === "product")?.href ?? null;
+  const merchantCartUrl = handoff.find((link) => link.kind === "cart")?.href ?? null;
+  const reviewUrl = handoff.find((link) => link.kind === "unknown")?.href ?? null;
   const shippingDisplay = offer.shipping?.costMinor == null
     ? null
     : formatPrice(offer.shipping.costMinor, 2, offer.shipping.currency ?? offer.price?.currency ?? "USD");
@@ -37,7 +41,8 @@ export function toOfferView(offer: NormalizedOffer, quantity = 1): OfferView {
     condition: offer.condition,
     shippingSummary: offer.shipping?.summary ?? null,
     shippingDisplay,
-    productUrl: offer.productUrl,
+    productUrl,
+    merchantCartUrl,
     merchantReviewUrl: reviewUrl,
     checkoutLabel: offer.checkout.kind === "merchant_cart_link"
       ? offer.checkout.nativeCheckout

@@ -74,6 +74,50 @@ export function merchantReviewUrl(value: string | null): string | null {
   } catch { return null; }
 }
 
+export type MerchantLinkKind = "product" | "cart" | "unknown";
+
+export interface MerchantHandoffLink {
+  href: string;
+  kind: MerchantLinkKind;
+  label: string;
+}
+
+const CART_PATH = /^\/cart(?:\/|$)/i;
+const CHECKOUT_PATH = /\/checkouts?(?:\/|$)/i;
+
+export function merchantHandoffLabel(kind: MerchantLinkKind): string {
+  if (kind === "product") return "Open product page. This does not pay or place an order.";
+  if (kind === "cart") return "Continue to merchant cart. This does not pay or place an order.";
+  return "Open merchant link. This does not pay or place an order.";
+}
+
+/**
+ * Product wording is used only for a provider product URL that is not a cart or checkout path.
+ * A Shopify `/cart/<variant>:<quantity>` permalink is a cart handoff, even when an older snapshot stored it as the review URL.
+ */
+export function merchantHandoffLinks(input: {
+  productUrl?: string | null;
+  cartUrl?: string | null;
+  otherUrl?: string | null;
+}): MerchantHandoffLink[] {
+  const links: MerchantHandoffLink[] = [];
+  const seen = new Set<string>();
+  const add = (value: string | null | undefined, role: "product" | "checkout" | "legacy") => {
+    const href = merchantReviewUrl(value ?? null);
+    if (!href || seen.has(href)) return;
+    const path = new URL(href).pathname;
+    const cart = CART_PATH.test(path);
+    const checkout = CHECKOUT_PATH.test(path);
+    const kind: MerchantLinkKind = cart ? "cart" : checkout || role !== "product" ? "unknown" : "product";
+    seen.add(href);
+    links.push({ href, kind, label: merchantHandoffLabel(kind) });
+  };
+  add(input.productUrl, "product");
+  add(input.cartUrl, "checkout");
+  add(input.otherUrl, "legacy");
+  return links;
+}
+
 export function summarizeText(value: string | null | undefined, max = 180): string | null {
   if (!value) return null;
   const collapsed = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

@@ -52,8 +52,9 @@ describe("authenticated merchant checkout evidence", () => {
   });
 
   it("keeps a single-variant merchant cart link aligned with the selected quantity", () => {
-    expect(toOfferView(offer!, 2).merchantReviewUrl).toBe("https://merchant.test/cart/1:2");
-    expect(toOfferView(offer!, 1).merchantReviewUrl).toBe("https://merchant.test/cart/1:1");
+    expect(toOfferView(offer!, 2).merchantCartUrl).toBe("https://merchant.test/cart/1:2");
+    expect(toOfferView(offer!, 1).merchantCartUrl).toBe("https://merchant.test/cart/1:1");
+    expect(toOfferView(offer!, 1).productUrl).toBeNull();
   });
   it("uses the merchant price and reconciled final total, while sanitizing buyer/payment data", () => {
     const evidence = verifyCheckout(checkout(), context);

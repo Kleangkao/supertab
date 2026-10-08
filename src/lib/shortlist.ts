@@ -12,6 +12,8 @@ export interface ShortlistItem {
   currency: string | null;
   shippingDisplay: string | null;
   shippingSummary: string | null;
+  productUrl: string | null;
+  merchantCartUrl: string | null;
   merchantReviewUrl: string | null;
   verifiedAt: string;
   savedAt: string;
@@ -104,6 +106,8 @@ function sanitize(value: unknown): ShortlistItem {
     currency: text(record.currency) || null,
     shippingDisplay: text(record.shippingDisplay) || null,
     shippingSummary: text(record.shippingSummary) || null,
+    productUrl: safeHttps(text(record.productUrl)),
+    merchantCartUrl: safeHttps(text(record.merchantCartUrl)),
     merchantReviewUrl: safeHttps(text(record.merchantReviewUrl)),
     verifiedAt: text(record.verifiedAt),
     savedAt: text(record.savedAt),

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { MerchantHandoffLinks } from "@/components/shopping-decisions";
 import type { PurchaseView } from "@/lib/view";
 
 const EMPTY = { email: "", firstName: "", lastName: "", streetAddress: "", line2: "", city: "", region: "", postalCode: "", country: "", discountCode: "" };
 
-export function CheckoutReview({ purchase, now, busy, merchantUrl, onVerify, onCalculate, onApprove }: {
-  purchase: PurchaseView; now: number; busy: boolean; merchantUrl: string | null;
+export function CheckoutReview({ purchase, now, busy, productUrl, cartUrl, otherUrl, onVerify, onCalculate, onApprove }: {
+  purchase: PurchaseView; now: number; busy: boolean; productUrl: string | null; cartUrl: string | null; otherUrl: string | null;
   onVerify: (checkoutId: string) => Promise<unknown>;
   onCalculate: (destination: typeof EMPTY) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
@@ -31,7 +32,7 @@ export function CheckoutReview({ purchase, now, busy, merchantUrl, onVerify, onC
         {purchase.merchantStatement.deliveryMethod && <p>Delivery method returned: {purchase.merchantStatement.deliveryMethod}</p>}
         {purchase.merchantStatement.missingCodes.length > 0 && <p>Still required by the merchant: {purchase.merchantStatement.missingCodes.join(", ")}</p>}
       </div>}
-      {merchantUrl && <p><a className="merchant-handoff" href={merchantUrl} target="_blank" rel="noopener noreferrer">Check price &amp; delivery</a></p>}
+      <MerchantHandoffLinks productUrl={productUrl} cartUrl={cartUrl} otherUrl={otherUrl} />
       <p>You’ll review checkout at the merchant. Opening it sends no payment.</p>
       <details className="review-details"><summary>About retail payments</summary>
         <p>SuperTab does not submit payment or place an order at the merchant.</p>

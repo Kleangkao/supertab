@@ -17,6 +17,7 @@ export interface OfferView {
   shippingDisplay: string | null;
   productUrl: string | null;
   checkoutLabel: string;
+  merchantCartUrl: string | null;
   merchantReviewUrl: string | null;
   verifiedAt: string;
   evidence?: { attribute: string; status: "confirmed" | "conflict" | "unknown"; detail: string }[];
