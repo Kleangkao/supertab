@@ -7,8 +7,9 @@ import { encodeBase58, requirePubkey } from "../merchant/base58";
 import { listen } from "../merchant/http";
 import { generateSolanaKey, signBytes } from "../merchant/keys";
 import { CHECKOUT_TTL_MS, CIRCLE_SOLANA_DEVNET_USDC_MINT, DEVNET_USDC_DECIMALS, LATE_PAYMENT_WINDOW_MS, TEST_PRODUCT, TEST_TOTAL_MINOR } from "../merchant/product";
+import { dispatchMerchant } from "../merchant/dispatch";
 import { DevnetMerchant } from "../merchant/service";
-import { MerchantStore, openDurableStore } from "../merchant/store";
+import { importMerchantSnapshot, MerchantStore, openDurableStore } from "../merchant/store";
 import { buildPaymentTransaction, signTransaction } from "../merchant/transaction";
 import type { ChainTransaction } from "../merchant/verify";
 import { readDevnetOrder, requestDevnetCheckout, submitDevnetSignature } from "../src/lib/devnet-merchant-client";
@@ -245,6 +246,40 @@ describe("owner-controlled devnet merchant", () => {
     const again = merchantFor(fixture, openDurableStore(file));
     expect(again.recover()).toEqual([]);
     expect(await again.confirm(checkout.id, signature, 1_000)).toEqual({ kind: "order", order });
+  });
+
+  it("reads an unknown order twice and refuses a second quantity without creating a checkout", async () => {
+    const fixture = harness();
+    const missing = await dispatchMerchant(fixture.merchant, "GET", "/orders/not-an-order", null);
+    expect(missing).toEqual({ status: 404, body: { error: "Order not found." } });
+    expect(await dispatchMerchant(fixture.merchant, "GET", "/orders/not-an-order", null)).toEqual(missing);
+    const product = await dispatchMerchant(fixture.merchant, "GET", "/product", null);
+    expect(product.status).toBe(200);
+    expect(await dispatchMerchant(fixture.merchant, "GET", "/product", null)).toEqual(product);
+    await expect(dispatchMerchant(fixture.merchant, "POST", "/checkouts", {
+      buyer: fixture.buyer.address,
+      sourceTokenAccount: fixture.source.address,
+      quantity: 2,
+    })).rejects.toThrow(/one marker/);
+    expect(fixture.store.checkouts.size).toBe(0);
+    expect(fixture.store.orders.size).toBe(0);
+  });
+
+  it("reloads a checkout from the snapshot writer used by hosted storage", async () => {
+    const fixture = harness();
+    let latest: unknown = null;
+    fixture.store.attachWriter((snapshot) => { latest = snapshot; });
+    const checkout = await fixture.merchant.createCheckout({ buyer: fixture.buyer.address, sourceTokenAccount: fixture.source.address, quantity: 1, now: 1_000 });
+    const restored = new MerchantStore();
+    importMerchantSnapshot(restored, latest);
+    expect(restored.checkouts.get(checkout.id)?.buyer).toBe(fixture.buyer.address);
+    expect(restored.orders.size).toBe(0);
+    expect(restored.checkouts.size).toBe(1);
+    const hosted = merchantFor(fixture, new MerchantStore());
+    expect(hosted.importSnapshotIfEmpty(latest)).toBe(true);
+    expect(hosted.importSnapshotIfEmpty(latest)).toBe(false);
+    expect(hosted.getOrder("missing")).toBeNull();
+    expect(hosted.recordCounts().checkouts).toBe(1);
   });
 
   it("lets SuperTab read one order again after the merchant process restarts", async () => {

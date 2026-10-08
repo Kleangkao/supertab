@@ -13,6 +13,8 @@ export interface PurchaseIntent {
   expiresAt: string;
   fundingPlanReference: string | null;
   cardRailProvider: string | null;
+  /** Merchant variant id when the approval was recorded. Null on older intents. */
+  sourceItemId: string | null;
 }
 
 export class PurchaseApprovalError extends Error {
@@ -36,6 +38,7 @@ export function createPurchaseIntent(input: {
   expiresAtMs: number;
   fundingPlanReference: string | null;
   cardRailProvider?: string | null;
+  sourceItemId?: string | null;
 }): PurchaseIntent {
   if (!input.explicitApproval) {
     throw new PurchaseApprovalError("This purchase has not been approved. A connected wallet is not approval.");
@@ -62,10 +65,24 @@ export function createPurchaseIntent(input: {
     expiresAt: new Date(input.expiresAtMs).toISOString(),
     fundingPlanReference: input.fundingPlanReference,
     cardRailProvider: input.cardRailProvider ?? null,
+    sourceItemId: input.sourceItemId ?? null,
   };
 }
 
-export function assertPurchasePayable(intent: PurchaseIntent | null, amountMinor: bigint, nowMs: number): void {
+export interface ApprovedPurchaseSubject {
+  productTitle: string;
+  variant: string | null;
+  currency: string;
+  merchantReference: string | null;
+  sourceItemId: string | null;
+}
+
+export function assertPurchasePayable(
+  intent: PurchaseIntent | null,
+  amountMinor: bigint,
+  nowMs: number,
+  subject?: ApprovedPurchaseSubject,
+): void {
   if (!intent) {
     throw new PurchaseApprovalError("No purchase approval exists. A wallet allowance is not approval.");
   }
@@ -74,5 +91,17 @@ export function assertPurchasePayable(intent: PurchaseIntent | null, amountMinor
   }
   if (amountMinor > intent.maximumAuthorizedAmountMinor) {
     throw new PurchaseApprovalError("The amount is above the approved ceiling.");
+  }
+  if (amountMinor !== intent.reviewedAmountMinor) {
+    throw new PurchaseApprovalError("The amount is not the approved final total.");
+  }
+  if (!subject) return;
+  const sameProduct = subject.productTitle === intent.productTitle
+    && subject.variant === intent.variant
+    && subject.currency.toUpperCase() === intent.currency
+    && subject.merchantReference === intent.merchantReference
+    && subject.sourceItemId === intent.sourceItemId;
+  if (!sameProduct) {
+    throw new PurchaseApprovalError("This approval is for a different product, variant, or currency.");
   }
 }

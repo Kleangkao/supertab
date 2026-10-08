@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { applyPaymentEvent, createPaymentLedger, type PaymentLedgerEvent } from "../src/lib/payment-ledger";
+import { applyPaymentEvent, createPaymentLedger, noteUnresolvedAttempt, type PaymentLedgerEvent } from "../src/lib/payment-ledger";
 
 const event = (kind: PaymentLedgerEvent["kind"], eventId: string = kind): PaymentLedgerEvent => ({
   eventId, kind, purchaseId: "purchase-1", currency: "USD", amountMinor: 4800n, mode: "local_simulation",
@@ -23,6 +23,15 @@ it("does not regress capture or refund when earlier events arrive late", () => {
   const refunded = applyPaymentEvent(captured, event("refunded"));
   expect(applyPaymentEvent(refunded, event("captured", "late-capture")).payment).toBe("PAYMENT_REFUNDED");
   expect(Object.keys(refunded)).not.toContain("order");
+});
+
+it("records an unknown outcome without treating it as decline, success, or a new payment", () => {
+  const ready = createPaymentLedger("purchase-1", 4800n, "local_simulation");
+  const pending = noteUnresolvedAttempt(ready);
+  expect(pending.payment).toBe("PAYMENT_PENDING");
+  expect(() => noteUnresolvedAttempt(pending)).toThrow(/instead of paying again/);
+  expect(applyPaymentEvent(pending, event("captured", "later-evidence")).payment).toBe("PAYMENT_CAPTURED");
+  expect(applyPaymentEvent(pending, event("declined", "later-decline")).payment).toBe("PAYMENT_FAILED");
 });
 
 it("allows a premature refund to be retried after capture without consuming it", () => {

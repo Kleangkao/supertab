@@ -40,7 +40,7 @@ export interface OrderRecord {
   refundSignature: string | null;
 }
 
-interface MerchantSnapshot {
+export interface MerchantSnapshot {
   version: 1;
   checkouts: Array<Omit<CheckoutRecord, "totalMinor"> & { totalMinor: string }>;
   payments: PaymentRecord[];
@@ -55,9 +55,14 @@ export class MerchantStore {
   failOrderWrites = 0;
   private writer: (() => void) | null = null;
 
-  /** Saves later mutations to one local file. The fault-injection counter stays in memory. */
+  /** Saves later mutations through one synchronous writer. The fault-injection counter stays in memory. */
+  attachWriter(writer: (snapshot: MerchantSnapshot) => void): void {
+    this.writer = () => writer(this.snapshot());
+  }
+
+  /** Saves later mutations to one local file. */
   attachFile(file: string): void {
-    this.writer = () => writeSnapshot(file, this.snapshot());
+    this.attachWriter((snapshot) => writeSnapshot(file, snapshot));
   }
 
   createCheckout(input: Omit<CheckoutRecord, "id" | "createdAt" | "expiresAt" | "orderId"> & { now: number }): CheckoutRecord {
@@ -122,6 +127,15 @@ export class MerchantStore {
     this.writer?.();
   }
 
+  /** Writes the current snapshot through the attached writer. */
+  flush(): void {
+    this.saved();
+  }
+
+  exportSnapshot(): MerchantSnapshot {
+    return this.snapshot();
+  }
+
   private snapshot(): MerchantSnapshot {
     return {
       version: 1,
@@ -142,6 +156,11 @@ export function openDurableStore(file: string): MerchantStore {
   }
   store.attachFile(file);
   return store;
+}
+
+/** Loads a snapshot into an empty store. A damaged or duplicate record is refused. */
+export function importMerchantSnapshot(store: MerchantStore, raw: unknown): void {
+  loadSnapshot(store, raw);
 }
 
 function loadSnapshot(store: MerchantStore, raw: unknown): void {

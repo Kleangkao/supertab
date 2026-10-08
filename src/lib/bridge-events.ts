@@ -9,6 +9,25 @@ export interface CardEventEffect {
 
 const NO_ORDER: OrderState = "ORDER_NOT_CREATED";
 
+/** A Stripe issuing event can update payment evidence only. It never creates a merchant order. */
+export function bindCardEventToApproval(
+  approval: { reviewedAmountMinor: bigint; currency: string },
+  event: unknown,
+): CardEventEffect {
+  const effect = mapBridgeCardEvent(event);
+  if (effect.order !== "ORDER_NOT_CREATED") {
+    throw new Error("A card event cannot confirm a merchant order.");
+  }
+  const amount = cardEventAmountMinor(event);
+  if (amount == null) throw new Error("This card event has no amount, so it cannot match the approved total.");
+  if (amount !== approval.reviewedAmountMinor) throw new Error("This card event amount is not the approved final total.");
+  const currency = cardEventCurrency(event);
+  if (currency && currency !== approval.currency.toUpperCase()) {
+    throw new Error("This card event currency is not the approved currency.");
+  }
+  return effect;
+}
+
 export function mapBridgeCardEvent(event: unknown): CardEventEffect {
   const record = asRecord(event);
   const type = typeof record?.type === "string" ? record.type : "";
@@ -70,6 +89,19 @@ function eventObject(record: Record<string, unknown> | null): Record<string, unk
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function cardEventAmountMinor(event: unknown): bigint | null {
+  const object = eventObject(asRecord(event));
+  const amount = object?.amount;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return null;
+  return BigInt(amount);
+}
+
+function cardEventCurrency(event: unknown): string | null {
+  const object = eventObject(asRecord(event));
+  const currency = object?.currency;
+  return typeof currency === "string" && /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : null;
 }
 
 function stringField(record: Record<string, unknown> | null, key: string): string | null {

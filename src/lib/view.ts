@@ -19,6 +19,7 @@ export interface OfferView {
   checkoutLabel: string;
   merchantReviewUrl: string | null;
   verifiedAt: string;
+  evidence?: { attribute: string; status: "confirmed" | "conflict" | "unknown"; detail: string }[];
 }
 
 export interface ExcludedOfferView {
@@ -141,12 +142,23 @@ export interface ProviderNote {
   message?: string;
 }
 
+export interface ConstraintView {
+  productQuery: string;
+  colors: string[];
+  sizes: string[];
+  maxPriceCents: string | null;
+  condition: "any" | "new" | "used";
+  shipToCountry: string | null;
+}
+
 export interface SessionView {
   sessionId: string;
   assistantMessage: string;
   constraintsLabel: string;
+  constraints: ConstraintView;
   messages: { role: "user" | "assistant"; text: string }[];
   exact: OfferView[];
+  uncertain: ExcludedOfferView[];
   excluded: ExcludedOfferView[];
   providers: ProviderNote[];
   gemini: "used" | "fallback" | "busy" | "not_configured";

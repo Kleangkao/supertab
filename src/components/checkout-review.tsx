@@ -31,8 +31,13 @@ export function CheckoutReview({ purchase, now, busy, merchantUrl, onVerify, onC
         {purchase.merchantStatement.deliveryMethod && <p>Delivery method returned: {purchase.merchantStatement.deliveryMethod}</p>}
         {purchase.merchantStatement.missingCodes.length > 0 && <p>Still required by the merchant: {purchase.merchantStatement.missingCodes.join(", ")}</p>}
       </div>}
-      {merchantUrl && <p><a href={merchantUrl} target="_blank" rel="noopener noreferrer">Review delivery and price at the merchant ↗</a></p>}
-      <p>Opening the merchant page does not approve a purchase. SuperTab does not submit payment or place an order.</p>
+      {merchantUrl && <p><a className="merchant-handoff" href={merchantUrl} target="_blank" rel="noopener noreferrer">Check price &amp; delivery</a></p>}
+      <p>You’ll review checkout at the merchant. Opening it sends no payment.</p>
+      <details className="review-details"><summary>About retail payments</summary>
+        <p>SuperTab does not submit payment or place an order at the merchant.</p>
+        <p>Order not created.</p>
+        <p>Payment not executed.</p>
+      </details>
       {verification.readAvailable && <form className="checkout-reference-form" onSubmit={event => {
         event.preventDefault();
         void onCalculate(destination).then(() => setDestination(EMPTY)).catch(() => undefined);

@@ -38,10 +38,10 @@ export function applyPaymentEvent(ledger: PaymentLedger, event: PaymentLedgerEve
   let payment = ledger.payment;
   switch (event.kind) {
     case "authorized":
-      if (payment === "PAYMENT_READY") payment = "PAYMENT_AUTHORIZED";
+      if (payment === "PAYMENT_READY" || payment === "PAYMENT_PENDING") payment = "PAYMENT_AUTHORIZED";
       break;
     case "declined":
-      if (payment === "PAYMENT_READY" || payment === "PAYMENT_AUTHORIZED") payment = "PAYMENT_FAILED";
+      if (payment === "PAYMENT_READY" || payment === "PAYMENT_PENDING" || payment === "PAYMENT_AUTHORIZED") payment = "PAYMENT_FAILED";
       break;
     case "captured":
       if (payment !== "PAYMENT_REFUNDED") payment = "PAYMENT_CAPTURED";
@@ -56,4 +56,12 @@ export function applyPaymentEvent(ledger: PaymentLedger, event: PaymentLedgerEve
       throw new Error("Unsupported payment evidence kind.");
   }
   return { ...ledger, payment, events: { ...ledger.events, [event.eventId]: fingerprint } };
+}
+
+/** A timeout or lost response is unresolved. It is not a decline, a capture, or permission to pay again. */
+export function noteUnresolvedAttempt(ledger: PaymentLedger): PaymentLedger {
+  if (ledger.payment !== "PAYMENT_READY") {
+    throw new Error("An unresolved payment is already recorded. Read its status instead of paying again.");
+  }
+  return { ...ledger, payment: "PAYMENT_PENDING" };
 }

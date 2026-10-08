@@ -4,7 +4,7 @@ import {
   DEVNET_USDC_DECIMALS,
   TEST_PRODUCT,
 } from "./product";
-import { assertProductQuantity, MerchantStore, postedTotal, settlementFor, type CheckoutRecord, type OrderRecord } from "./store";
+import { assertProductQuantity, importMerchantSnapshot, MerchantStore, postedTotal, settlementFor, type CheckoutRecord, type OrderRecord } from "./store";
 import type { SolanaKey } from "./keys";
 import { addSignerSignature, buildPaymentTransaction, buildRefundTransaction, transactionBase64, type BuiltTransaction } from "./transaction";
 import { samePaymentMessage, samePaymentWithWalletBudget } from "../src/lib/payment-message";
@@ -222,6 +222,18 @@ export class DevnetMerchant {
   getOrder(orderId: string): OrderResponse | null {
     const order = this.store.orders.get(orderId);
     return order ? presentOrder(order) : null;
+  }
+
+  recordCounts(): { orders: number; checkouts: number; payments: number } {
+    return { orders: this.store.orders.size, checkouts: this.store.checkouts.size, payments: this.store.payments.size };
+  }
+
+  /** Loads the preserved ledger once. A store that already has records is left unchanged. */
+  importSnapshotIfEmpty(raw: unknown): boolean {
+    if (this.store.orders.size > 0 || this.store.checkouts.size > 0 || this.store.payments.size > 0) return false;
+    importMerchantSnapshot(this.store, raw);
+    this.store.flush();
+    return true;
   }
 
   private async confirmOnce(checkoutId: string, signature: string, now: number): Promise<ConfirmResult> {

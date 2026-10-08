@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { clearWalletReview } from "../src/lib/wallet-review";
 import { describe, expect, it } from "vitest";
-import { mapBridgeCardEvent, verifyIssuingWebhook } from "../src/lib/bridge-events";
+import { mapBridgeCardEvent, bindCardEventToApproval, verifyIssuingWebhook } from "../src/lib/bridge-events";
 import { BridgeCardRail, describeSolanaFundingBinding } from "../src/lib/bridge-rail";
 import { emptyConstraints, mergeConstraints, resolveConstraints } from "../src/lib/constraints";
 import { fetchDflowOrder, parseDflowOrder, priceImpactPercentLabel, QUOTE_FRESHNESS_MS, solanaTransactionSummary } from "../src/lib/dflow";
@@ -119,13 +119,13 @@ describe("commerce normalization", () => {
     expect(classified.excluded.map((item) => item.reasons.join(" ")).join(" ")).toContain("budget");
   });
 
-  it("keeps a real title when it matches one required product word", () => {
+  it("does not treat one title word as the whole product", () => {
     const constraints = mergeConstraints(emptyConstraints(), "Find me black running shoes under $120.");
     const classified = classifyOffers([
       offer({ title: "Hoka Clifton 10 Black Running", amount: 9000n }),
     ], constraints);
-    expect(classified.exact).toHaveLength(1);
-    expect(classified.excluded).toHaveLength(0);
+    expect(classified.exact).toHaveLength(0);
+    expect(classified.uncertain.map((item) => item.offer.title)).toEqual(["Hoka Clifton 10 Black Running"]);
   });
 
   it("reports eBay as not configured and Shopify timeouts without throwing", async () => {
@@ -451,6 +451,69 @@ describe("Gemini interactions", () => {
     ]);
     expect(maxActive).toBe(1);
   });
+
+  it("keeps a follow-up budget after the shopping process memory is cleared", async () => {
+    const memory = new Map<string, string>();
+    const sessionStore = {
+      load: async (id: string) => memory.get(id) ?? null,
+      save: async (id: string, body: string) => { memory.set(id, body); },
+    };
+    const config = readConfig({
+      GEMINI_API_KEY: "",
+      EBAY_CLIENT_ID: "",
+      EBAY_CLIENT_SECRET: "",
+      SHOPIFY_CATALOG_ENABLED: "false",
+    });
+    const first = await new ShoppingService({ config, sessionStore }).converse(null, "Find me a black polo under $50.");
+    const second = await new ShoppingService({
+      config: readConfig({
+        GEMINI_API_KEY: "test-gemini-key",
+        EBAY_CLIENT_ID: "",
+        EBAY_CLIENT_SECRET: "",
+        SHOPIFY_CATALOG_ENABLED: "false",
+      }),
+      sessionStore,
+      fetchImpl: async () => Response.json({
+        steps: [{
+          type: "model_output",
+          content: [{
+            type: "text",
+            text: JSON.stringify({ isNewSearch: false, productQuery: "hat", addColors: ["navy"], clearMaxPrice: true, maxPriceCents: 100 }),
+          }],
+        }],
+      }),
+    }).converse(first.sessionId, "Navy is fine too.");
+    expect(second.gemini).toBe("used");
+    expect(second.constraintsLabel).toContain("polo");
+    expect(second.constraintsLabel).toContain("navy");
+    expect(second.constraintsLabel).toContain("$50.00");
+    expect(second.constraintsLabel).not.toContain("hat");
+  });
+
+  it("uses the shopper's words when the Gemini budget is exhausted", async () => {
+    const service = new ShoppingService({
+      config: readConfig({
+        GEMINI_API_KEY: "test-gemini-key",
+        EBAY_CLIENT_ID: "",
+        EBAY_CLIENT_SECRET: "",
+        SHOPIFY_CATALOG_ENABLED: "false",
+      }),
+      geminiBudget: { reserve: async () => false },
+      fetchImpl: async () => { throw new Error("Gemini should not be called"); },
+    });
+    const view = await service.converse(null, "Find me a black polo under $50");
+    expect(view.gemini).toBe("busy");
+    expect(view.constraintsLabel).toContain("polo");
+    expect(view.constraintsLabel).toContain("$50.00");
+  });
+
+  it("rejects an oversized shopping request before calling Gemini", async () => {
+    const service = new ShoppingService({
+      config: readConfig({ GEMINI_API_KEY: "test-gemini-key", SHOPIFY_CATALOG_ENABLED: "false", EBAY_CLIENT_ID: "", EBAY_CLIENT_SECRET: "" }),
+      fetchImpl: async () => { throw new Error("Gemini should not be called"); },
+    });
+    await expect(service.converse(null, "polo ".repeat(120))).rejects.toThrow(/500 characters/);
+  });
 });
 
 describe("shopping service config", () => {
@@ -601,7 +664,16 @@ describe("purchase approval and Bridge card events", () => {
     assertPurchasePayable(intent, 4800n, 2_000);
     expect(() => assertPurchasePayable(null, 4800n, 2_000)).toThrow(/wallet allowance/i);
     expect(() => assertPurchasePayable(intent, 4801n, 2_000)).toThrow(/ceiling/i);
+    expect(() => assertPurchasePayable(intent, 4799n, 2_000)).toThrow(/approved final total/i);
     expect(() => assertPurchasePayable(intent, 4800n, 61_000)).toThrow(/expired/i);
+    const subject = {
+      productTitle: "Polo", variant: "Navy", currency: "USD",
+      merchantReference: "https://shop.example/polo", sourceItemId: "variant-1",
+    };
+    const bound = { ...intent, sourceItemId: "variant-1" };
+    assertPurchasePayable(bound, 4800n, 2_000, subject);
+    expect(() => assertPurchasePayable(bound, 4800n, 2_000, { ...subject, sourceItemId: "other-variant" })).toThrow(/different product/i);
+    expect(() => assertPurchasePayable(bound, 4800n, 2_000, { ...subject, currency: "EUR" })).toThrow(/different product/i);
   });
 
   it("keeps a blocked Bridge rail from executing and separates capture from the merchant order", () => {
@@ -636,6 +708,20 @@ describe("purchase approval and Bridge card events", () => {
     expect(reversed.payment).toBe("PAYMENT_REVERSED");
     expect(captured.order).toBe("ORDER_NOT_CREATED");
     expect(capturedPaymentIsNotAnOrder(captured.payment, captured.order)).toBe(true);
+    const approval = { reviewedAmountMinor: 1750n, currency: "USD" };
+    const matching = {
+      type: "issuing_transaction.created",
+      data: { object: { id: "ipi_match", object: "issuing.transaction", type: "capture", amount: 1750, currency: "usd" } },
+    };
+    expect(bindCardEventToApproval(approval, matching)).toMatchObject({ payment: "PAYMENT_CAPTURED", order: "ORDER_NOT_CREATED" });
+    expect(() => bindCardEventToApproval(approval, {
+      type: "issuing_transaction.created",
+      data: { object: { id: "ipi_other", object: "issuing.transaction", type: "capture", amount: 1800, currency: "usd" } },
+    })).toThrow(/approved final total/);
+    expect(() => bindCardEventToApproval(approval, {
+      type: "issuing_transaction.created",
+      data: { object: { id: "ipi_bare", object: "issuing.transaction", type: "capture" } },
+    })).toThrow(/no amount/);
     const payload = JSON.stringify({ type: "issuing_authorization.created" });
     const secret = "whsec_test_only";
     const timestamp = "1700000000";

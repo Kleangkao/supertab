@@ -1,5 +1,67 @@
 # SuperTab project state
 
+## Hosted devnet merchant — October 6, 2026
+
+The public app is https://supertab-main.vercel.app. The devnet merchant is https://supertab-devnet-merchant.jamesbitarcade.workers.dev. It is a Cloudflare Worker with one Durable Object SQLite ledger, not a copy of the file on serverless disk. The local file `data/devnet-merchant.json` was not modified. Its preserved refunded order `e485b032-7abd-4a59-849c-f37775ec57c6` was read from the hosted service before and after a redeploy, with the same payment and refund signatures and status `refunded`. The two paid orders `ab0421c2-e708-40cd-b30c-a1e2a433b512` and `3518beef-1b53-4e5c-8682-0baca6b1c3fa` stayed `paid`. An unknown order returned 404. A repeated read matched. An invalid checkout quantity returned 400 and did not change the order, checkout, or payment counts. No new checkout, payment, refund, or wallet signature was created. Railway was not used. Gemini is configured on the public site as a server-only secret; health reports `gemini-3.1-flash-lite`, and the structured text parser remains the fallback. On October 6 the worker was redeployed again as version `302b2f9d-6a3c-45a2-8a8f-9a99a48acc2a`. The same three orders were read afterward and matched the local snapshot, including the refunded order’s payment and refund signatures. Mainnet execution stays disabled.
+
+## Sponsor rotated before verification — October 6, 2026
+
+The merchant’s mismatch for the retained authorization is only `extra.feePayer`. They offered `D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM` and SuperTab sent `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`. `quotedAt` `2026-10-06T07:46:19.939Z` matched, so the fee payer was not rewritten locally; the sponsor changed between preparation and verification. HTTP 402, no settlement, and the shopper signature is not on chain. The wallet still holds 1.019600 USDC and the confirmed conversion is still the newest transaction. A later offer returned to `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP` with a new `quotedAt`; that sponsor was not written into the retained authorization. Submission now rechecks the live offer and stops, naming both sponsors, when `extra.feePayer` differs.
+
+## Merchant refused the fee payer field — October 6, 2026
+
+The sign request retained the authorization and submitted it. The merchant returned HTTP 402 with `local:requirement_mismatch:extra.feePayer` and message `No matching payment requirements`. There is no settlement and no certificate. `maxTimeoutSeconds` was 300. The sent fee payer and the current offer are both `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`. The sent `extra` also contains `memo`; the offer’s `extra` contains only `feePayer` and `quotedAt`. The confirmed conversion and idempotency key are unchanged.
+
+## Fresh payment prepared — October 6, 2026
+
+Signing the merchant payment retains the authorization and submits it in that same request. A previous attempt-wide submit event no longer blocks a later signature. The last unsigned signature expired unsubmitted at last valid height 431,871,066. A replacement is `payment_prepared` on the same attempt, with `maxTimeoutSeconds` 300, sponsor `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`, and exactly 1.000000 USDC to the same recipient. The confirmed conversion and idempotency key are unchanged. There is no settlement.
+
+## Quoted timeout preserved — October 6, 2026
+
+The merchant refusal was `local:requirement_mismatch:maxTimeoutSeconds` because the authorization sent 293 remaining seconds instead of the published 300. The quoted timeout is now stored and echoed unchanged, and merchant responses retain their numeric HTTP status. The existing shopper signature could not be reused: its blockhash was already past last valid height 431,867,254, it was not on chain, and there was no settlement. A replacement payment is `payment_prepared` on the same attempt, with `maxTimeoutSeconds` 300, sponsor `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`, and exactly 1.000000 USDC to the same recipient. The confirmed conversion and idempotency key are unchanged. A new shopper signature is required.
+
+## Merchant declined the payment — October 6, 2026
+
+The signed payment for attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` was submitted once with the retained idempotency key. The merchant body refused it before broadcast: `local:requirement_mismatch:maxTimeoutSeconds`, message `No matching payment requirements`. SuperTab did not retain the numeric HTTP status; the response was not HTTP 200. The submitted `maxTimeoutSeconds` was 293, while the merchant offer publishes 300. The shopper signature is not on chain, the sponsor signature slot is empty, and the wallet still holds 1.019600 USDC. Its newest transaction is still the confirmed conversion. The signed payment’s blockhash then expired, last valid height 431,867,254. Sponsor `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`, recipient, and 1.000000 USDC amount are unchanged.
+
+## Payment sponsor updated — October 6, 2026
+
+The merchant fee payer changed to `BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP`. Before that change was stored, the same attempt had no settlement, no merchant response, and no signed payment. The confirmed conversion remained the wallet’s newest transaction. The attempt and idempotency key are unchanged. The prepared payment is exactly 1.000000 USDC to `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, with the fee paid by the new sponsor. A signature is retained and submitted in the same request. No second swap was created.
+
+## Authorization retention fixed — October 6, 2026
+
+The replacement payment signature was rejected before retention. The attempt stayed `payment_prepared` with no signed payment, no merchant response, and no settlement. The wallet still held 1.019600 USDC, and the newest wallet transaction was still the confirmed conversion. The idempotency key was unchanged.
+
+Retention used one event id for the whole attempt, `payment-retain` plus the attempt id. That id was already recorded for the expired signature, so the replacement signature was treated as a replay and `paymentAuthorization` stayed `not_stored`. Retention now uses the shopper signature, so a later signature on the same attempt can be stored. The unsigned replacement’s blockhash had expired by the time of this check, with no signature stored.
+
+## Replacement payment prepared — October 6, 2026
+
+The expired merchant signature on attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` had no merchant submission and no settlement. The wallet still held 1.019600 USDC, and the only recent wallet transaction was the confirmed conversion. A replacement unsigned payment is now `payment_prepared` on the same attempt and idempotency key: exactly 1.000000 USDC, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, sponsor `GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb`. Storing the next valid signature submits that authorization immediately. The confirmed conversion is unchanged.
+
+## Payment signature expired — October 6, 2026
+
+The merchant signature for attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` is stored and the original authorization is retained. Its blockhash lifetime had already ended: last valid block height 431,857,326, confirmed height 431,857,490. The merchant quote was still current, through 2026-10-06T06:27:06.902Z. Submission was refused and the attempt stayed `payment_signed` with `lifetimeExpired`. No merchant request was sent, no settlement was recorded, and no certificate was issued. The retained authorization was not replaced.
+
+## Conversion settled — October 6, 2026
+
+Attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` submitted one replacement conversion after Phantom signed it. The signed order was synchronous: input 8,535,674 lamports, minimum 1,014,642 USDC base units, slippage 50 bps, priority 616 lamports, and total cost 8,541,290 lamports, inside the 8,585,479 lamport ceiling. The signature is `5s2J62z2kxyKMF71RqUR4w2fQixxvEWKvsCziySxFAzzhHX9Qv8PavDWFxFKd2GystjM12Th3Xfpw4pSK34Bm4k6`. It confirmed on chain. No second swap was sent.
+
+The first USDC read happened before the token balance was visible and left the attempt at `swap_confirmed` with the USDC preserved. A later read showed 1.019600 USDC. The same confirmed attempt was rechecked and is now `funding_rechecked`. Sponsor `GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb`, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, and the 1.000000 USDC amount are unchanged. No merchant payment has been signed or submitted.
+
+## Replacement conversion prepared — October 6, 2026
+
+The expired signature on attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` was confirmed absent from the chain and had no swap submission. The owner then authorized one replacement conversion on that same attempt, kept the 8,585,479 lamport ceiling and 0.01 SOL reserve, and accepted sponsor `GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb`. The recipient and 1.000000 USDC amount stayed the same.
+
+`prepare_swap` checked the original signature, found it unknown to the chain, and bound a new synchronous unsigned order. The stored sponsor is now the accepted replacement. The order is input 8,535,674 lamports, minimum 1,014,415 USDC base units, slippage 50 bps, priority 60 lamports, and total cost 8,540,734 lamports. No replacement has been signed or submitted. A signature that is already on chain, or an attempt that already has a swap submission, is still refused.
+
+## Signed conversion expired — October 6, 2026
+
+Phantom signed the conversion for attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020`. The stored transaction is synchronous, input 8,535,674 lamports, minimum 1,018,734 USDC base units, slippage 50 bps, priority 185 lamports, and total cost 8,540,859 lamports. That cost is inside the 8,585,479 lamport owner ceiling. The wallet still holds 57,052,346 lamports, enough for that cost plus the 0.01 SOL reserve. Sponsor and recipient on the attempt are unchanged.
+
+The signature expired before submission. Its last valid block height is 431,850,068. Confirmed block height at the check was 431,851,652, 1,584 blocks later. `submit_swap` recorded `lifetimeExpired` and returned “The signed swap expired. It was not replaced.” The signature is not on chain. No second swap was created. The USDC balance is 4 base units, so the conversion did not fund the purchase.
+
+The merchant’s current Solana sponsor is `GVJJ7rdGiXr5xaYbRwRbjfaJL7fmwRygFi1H6aGqDveb`. The approved sponsor remains `D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM`. Amount, recipient, and mint still match. Payment preparation stopped on the sponsor change and did not build a transaction. No merchant payment was signed or sent.
+
 ## Bound unsigned conversion — October 6, 2026
 
 The same unpaid attempt `st-anchor-4ca8ae1e05b0be1e1d49a62af5756020` is now `swap_prepared`. Wallet `JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7`, recipient `DGxcPrAHL9YM3hW7iXuHFJmr87Zr6AMA4jCYHBpuvMgE`, sponsor `D6ZhtNQ5nT9ZnTHUbqXZsTx5MH2rPFiBBggX4hY1WePM`, and exactly 1.000000 USDC are unchanged. No swap or merchant transaction has been signed or submitted. The original reviewed terms remain in the journal.

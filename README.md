@@ -2,7 +2,9 @@
 
 Prototype. A shopper can review one recorded Solana Spaces quote and, separately, a completed owner-controlled devnet purchase and refund. The devnet payment did not buy the shirt, and no real-retailer purchase has been completed.
 
-From this directory, start the local merchant with `npm run merchant`, then `npm run dev`, and open http://localhost:3000. The no-payment demo is in [docs/DEMO.md](docs/DEMO.md). Current evidence is in [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+The public site is https://supertab-main.vercel.app. Its devnet merchant is https://supertab-devnet-merchant.jamesbitarcade.workers.dev. Retail checkout stays quote-only. The devnet page is a separate test product. Card payments are planned. The timestamp merchant integration has no verified settlement or certificate.
+
+From this directory, start the local merchant with `npm run merchant`, then `npm run dev`, and open http://localhost:3000. The local merchant listens on `127.0.0.1:8787` and keeps its ledger in `data/devnet-merchant.json`. The hosted merchant does not use that file. It stores the same ledger in a Cloudflare Durable Object, so a redeploy keeps the orders. Current evidence is in [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md). The rehearsal is in [docs/DEMO_REHEARSAL.md](docs/DEMO_REHEARSAL.md).
 
 SuperTab is AI shopping powered by Solana assets. A shopper describes a product. SuperTab searches real merchants, compares the offers it actually received, and works out whether USDC already in the shopper's Solana wallet covers the known price. If it does not, DFlow can quote a conversion from a supported Solana asset into USDC. A replaceable card rail is meant to pay an ordinary merchant later. That rail is not connected, and this build does not move funds.
 
@@ -34,7 +36,7 @@ Wallet control uses a server-generated challenge bound to the app origin, sessio
 
 After wallet control is verified, **Test wallet transaction signing · Devnet** offers an optional sign-only check for accounts that advertise legacy devnet support. The server prepares a single memo using a fresh blockhash from the fixed public devnet RPC. The user reviews the memo and explicitly requests `solana:signTransaction` with chain `solana:devnet`. Both browser and server reject changed transaction bytes; the server verifies the signature, consumes the check and discards the signed payload. Checks expire after 60 seconds or a changed review. Nothing is broadcast, no fee is incurred by SuperTab, and purchase/funding/payment states remain separate. This diagnostic proves neither DFlow conversion nor USDC readiness. A live fee-query test proves the message format is accepted by devnet; an actual extension signature is still unproven here.
 
-Purchase approval additionally requires a verified final merchant checkout total. A catalog or listing planning amount is rejected with HTTP 403 rather than recorded as an approved purchase. Payment readiness requires final-total knowledge, current approval, real on-chain USDC coverage and a ready rail; a live conversion quote or sample balance cannot substitute for funds already available.
+Purchase approval additionally requires a verified final merchant checkout total for the same product, variant, and amount. A lower or higher total, or a different variant, does not reuse that approval. A catalog or listing planning amount is rejected with HTTP 403 rather than recorded as an approved purchase. The gap between those pieces and a completed retail purchase is in [docs/PRODUCT_GAP_AUDIT.md](docs/PRODUCT_GAP_AUDIT.md). The card-rail limit is in [docs/PAYMENT_RAIL_DECISION.md](docs/PAYMENT_RAIL_DECISION.md). Shopify can return an order only after this agent calls `complete_checkout`; that call is not made, and a shopper-finished checkout cannot be read back. See [docs/MERCHANT_ORDER_PATH.md](docs/MERCHANT_ORDER_PATH.md). Payment readiness requires final-total knowledge, current approval, real on-chain USDC coverage and a ready rail; a live conversion quote or sample balance cannot substitute for funds already available.
 
 ## Presenter flow
 
@@ -78,11 +80,13 @@ Open http://localhost:3000.
 
 | Variable | Required for |
 | --- | --- |
-| `GEMINI_API_KEY` | Gemini shopping understanding. Without it, SuperTab uses a deterministic parser. |
+| `GEMINI_API_KEY` | Server-only Gemini shopping understanding. Never use a `NEXT_PUBLIC_` name. Without it, SuperTab uses a deterministic parser. Requests are limited to 500 characters, time out after 12 seconds, and the hosted deployment also stops at 20 calls per client each 10 minutes and 120 calls per UTC day. |
 | `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` | eBay listing search. |
 | `SOLANA_RPC_URL` | Optional. Blank uses public mainnet. Devnet checkout does not read this variable. |
 | `SOLANA_CLUSTER` | Shopping funding uses mainnet. The RPC genesis hash must match mainnet even if configuration labels it otherwise. |
 | `SOLANA_DEVNET_RPC_URL` | Optional HTTPS devnet endpoint for the owner-controlled checkout. Blank uses public devnet. The merchant verifies the genesis hash and refuses mainnet or testnet. |
+| `DEVNET_MERCHANT_URL` | Hosted merchant origin. Blank uses `http://127.0.0.1:8787`. |
+| `SUPERTAB_CONTROL_TOKEN` | Server-only token for the hosted merchant, shopping-session store, and Gemini budget. The browser does not receive it. |
 | `DFLOW_QUOTE_BASE_URL` | Defaults to the DFlow dev quote API, which does not need a key. |
 | `DFLOW_API_KEY` | Only if you point quotes at a key-gated DFlow host. |
 | `SHOPIFY_CATALOG_ENABLED` | Shopify discovery is on by default and needs no secret. |
@@ -99,6 +103,14 @@ On this PC, the repository is in `F:\James\codex project file\SuperTab\supertab-
 For a merchant-calculated total, select the exact product and quantity and submit the real delivery destination in the purchase review. SuperTab calls `create_checkout` and does not complete it. Shipping and tax are accepted only when the merchant returns those components. An existing checkout reference can still be read with `get_checkout`. A cart reference, subtotal-only checkout, extra items, mismatched variant/quantity, inconsistent money, or an expired checkout cannot supply a payable amount. Purchase approval remains limited to a ready final total.
 
 Once a final total is verified, **Approve purchase terms** records consent for the displayed product and amount. It does not sign a swap, pay a merchant or create an order. A wallet refresh resets approval; product or quantity changes also discard checkout evidence. Buyer contact details and payment instruments returned by the merchant are discarded, and checkout capability references are not included in session responses.
+
+## Android app
+
+The CLOCK IN build is a signed WebView shell, application id `app.supertab.shop`, version `1.0.0` (version code 1). It loads https://supertab-main.vercel.app/ and sends `solana-wallet:` links to Mobile Wallet Adapter. Shopping and the devnet merchant stay on the hosted servers. The APK does not contain API keys, the merchant control token, or a signing key.
+
+Build and install instructions are in [android/README.md](android/README.md). The release APK is `android/app/build/outputs/apk/release/app-release.apk`, copied for submission to `submission/supertab-clockin.apk`. SHA-256: `72d7c78915c89668a2041e0412493a674d2b22086e04670e4cb5b4f395c6c1ca`.
+
+On 8 October 2026 this APK installed and launched on a physical Solana Seeker running Android 16. Inside the app, a search for a black polo under $50 returned real Shopify listings, a follow-up added navy, and the selected polo showed a $39.99 catalog price with shipping and tax not confirmed. Mobile Wallet Adapter reported the Seeker wallet and opened `com.solanamobile.wallet`. That wallet screen then said it could not load the wallet. No balance was read through the connection, and no payment was sent. The devnet page loaded the existing refunded test order. Public-address lookup remains available from “Explore without connecting.”
 
 ## Scripts
 

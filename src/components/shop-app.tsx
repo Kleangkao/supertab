@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { PaymentRehearsal } from "@/components/payment-rehearsal";
 import { AssetConversion } from "@/components/asset-conversion";
@@ -11,13 +11,37 @@ import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signMa
 import type { WalletChallenge } from "@/lib/wallet-proof";
 import type { DevnetSigningCheck } from "@/lib/devnet-memo";
 import { clearWalletReview } from "@/lib/wallet-review";
+import {
+  classifyWalletFailure,
+  clearShoppingSessionId,
+  isAndroidShell,
+  readShoppingSessionId,
+  walletFailureMessage,
+  writeShoppingSessionId,
+} from "@/lib/android-shell";
+import { ensureAndroidWallet } from "@/lib/mobile-wallet";
+import { SHOPPING_MESSAGE_LIMIT } from "@/lib/constraints";
 import type { HealthView, OfferView, PurchaseView, SessionView } from "@/lib/view";
+import { emptyStateActions, EvidenceList, RequirementControls, saveOffer, ShortlistPanel } from "@/components/shopping-decisions";
 
 // An explicit convenience for this demo session, never an application wallet default.
 const DEMO_ADDRESS = "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7";
-const STORAGE_KEY = "supertab.shopping-session.v1";
 type WalletMode = PurchaseView["walletMode"];
 const currentTime = () => Date.now();
+
+function subscribeNothing() { return () => {}; }
+function androidShellSnapshot() { return isAndroidShell(navigator.userAgent); }
+function androidShellServer() { return false; }
+function subscribeOnline(onChange: () => void) {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => {
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+  };
+}
+function onlineSnapshot() { return navigator.onLine; }
+function onlineServer() { return true; }
 
 export function ShopApp() {
   const [health, setHealth] = useState<HealthView | null>(null);
@@ -25,6 +49,7 @@ export function ShopApp() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [walletMode, setWalletMode] = useState<WalletMode>("none");
   const [address, setAddress] = useState("");
   const [walletChains, setWalletChains] = useState<readonly string[]>([]);
@@ -37,6 +62,8 @@ export function ShopApp() {
   const [canSignDevnet, setCanSignDevnet] = useState(false);
   const [walletSigned, setWalletSigned] = useState(false);
   const [now, setNow] = useState(0);
+  const androidShell = useSyncExternalStore(subscribeNothing, androidShellSnapshot, androidShellServer);
+  const offline = !useSyncExternalStore(subscribeOnline, onlineSnapshot, onlineServer);
   const lock = useRef(false);
   const walletEpoch = useRef(0);
   const walletOff = useRef<(() => void) | null>(null);
@@ -45,6 +72,8 @@ export function ShopApp() {
   const walletDesk = useRef<{ sessionId: string; termsId: string; address: string } | null>(null);
   const latestSession = useRef<SessionView | null>(null);
   const pendingWalletReset = useRef<{ sessionId: string; offerId: string; quantity: number } | null>(null);
+  const pendingShopTurnId = useRef<string | null>(null);
+  const pendingShopTurnText = useRef<string | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const selectedOfferId = session?.selectedOfferId;
   useEffect(() => {
@@ -52,18 +81,19 @@ export function ShopApp() {
   }, [selectedOfferId]);
 
   useEffect(() => {
-    discoverStandardWallets(window);
+    void ensureAndroidWallet().finally(() => discoverStandardWallets(window));
     const controller = new AbortController();
     void fetch("/api/health", { signal: controller.signal }).then(async response => {
       if (response.ok) setHealth(await response.json() as HealthView);
     }).catch(() => undefined);
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     let saved: string | null = null;
-    try { saved = sessionStorage.getItem(STORAGE_KEY); } catch { /* Storage is optional. */ }
+    try { saved = readShoppingSessionId(sessionStorage, localStorage); } catch { /* Storage is optional. */ }
     if (saved) {
       lock.current = true;
       queueMicrotask(() => { if (!controller.signal.aborted) setBusy("Restoring your shopping session…"); });
-      void fetch(`/api/shop?sessionId=${encodeURIComponent(saved)}`, { signal: controller.signal }).then(async response => {
+      void fetch(`/api/shop?sessionId=${encodeURIComponent(saved)}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+        if (response.status === 503) throw new Error("Shopping session storage is temporarily unavailable. Your shortlist is still here; try restoring again in a moment.");
         if (!response.ok) throw new Error("Your previous search expired. Let’s find something new.");
         const restored = await response.json() as SessionView;
         if (restored.purchase?.walletMode === "connected") {
@@ -76,10 +106,35 @@ export function ShopApp() {
         setFundingMint(restored.purchase?.funding?.candidateMint ?? null);
         setNow(Date.now());
       }).catch(caught => {
-        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Could not restore your search.");
+        if (controller.signal.aborted) return;
+        const message = caught instanceof Error ? caught.message : "Could not restore your search.";
+        if (message.includes("expired")) {
+          try { clearShoppingSessionId(sessionStorage, localStorage); } catch { /* Storage is optional. */ }
+        }
+        setError(message);
       }).finally(() => { if (!controller.signal.aborted) { lock.current = false; setBusy(null); } });
     }
     return () => { controller.abort(); window.clearInterval(timer); walletOff.current?.(); };
+  }, []);
+
+  useEffect(() => {
+    function onUnavailable() {
+      lock.current = false;
+      setBusy(null);
+      setError(walletFailureMessage("unavailable"));
+    }
+    function onViewport() {
+      const viewport = window.visualViewport;
+      const overlap = viewport ? Math.max(0, window.innerHeight - viewport.height) : 0;
+      document.documentElement.style.setProperty("--keyboard-overlap", `${overlap}px`);
+    }
+    window.addEventListener("supertab-wallet-unavailable", onUnavailable);
+    window.visualViewport?.addEventListener("resize", onViewport);
+    onViewport();
+    return () => {
+      window.removeEventListener("supertab-wallet-unavailable", onUnavailable);
+      window.visualViewport?.removeEventListener("resize", onViewport);
+    };
   }, []);
 
   async function request(path: string, payload: object, loading: string) {
@@ -87,18 +142,39 @@ export function ShopApp() {
     const epoch = walletEpoch.current;
     lock.current = true; setBusy(loading); setError(null);
     try {
-      const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) });
+      const shopMessage = path === "/api/shop" && payload && typeof payload === "object" && "message" in payload && typeof (payload as { message?: unknown }).message === "string"
+        ? (payload as { message: string }).message.trim()
+        : "";
+      if (path === "/api/shop" && pendingShopTurnText.current !== shopMessage) {
+        pendingShopTurnId.current = null;
+        pendingShopTurnText.current = shopMessage;
+      }
+      const turnId = path === "/api/shop"
+        ? (pendingShopTurnId.current ?? crypto.randomUUID())
+        : null;
+      if (path === "/api/shop" && turnId) pendingShopTurnId.current = turnId;
+      const bodyPayload = path === "/api/shop" ? { ...payload, turnId } : payload;
+      const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(bodyPayload), signal: AbortSignal.timeout(90_000) });
       const body = await response.json() as SessionView & { error?: string; session?: SessionView };
       if (!response.ok) {
         if (body.session && epoch === walletEpoch.current) {
           latestSession.current = body.session; setSession(body.session); setNow(currentTime());
         }
+        if (response.status === 409) {
+          pendingShopTurnId.current = null;
+          pendingShopTurnText.current = null;
+          throw new Error(body.error ?? "This search was updated somewhere else. Refresh before trying again.");
+        }
         throw new Error(body.error ?? "Please try again.");
       }
       if (epoch !== walletEpoch.current) return;
+      if (path === "/api/shop") {
+        pendingShopTurnId.current = null;
+        pendingShopTurnText.current = null;
+      }
       latestSession.current = body;
       setSession(body); setNow(currentTime());
-      try { sessionStorage.setItem(STORAGE_KEY, body.sessionId); } catch { /* Storage is optional. */ }
+      try { writeShoppingSessionId(sessionStorage, localStorage, body.sessionId); } catch { /* Storage is optional. */ }
       return body;
     } catch (caught) {
       if (epoch !== walletEpoch.current) return;
@@ -124,16 +200,19 @@ export function ShopApp() {
       setSession(latestSession.current);
       if (current.selectedOfferId) pendingWalletReset.current = { sessionId: current.sessionId, offerId: current.selectedOfferId, quantity: current.purchase?.checkout.quantity ?? 1 };
     }
-    try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Storage is optional. */ }
-    setError("Your wallet accounts or network changed. Reconnect to review a fresh funding plan.");
+    setError("Your wallet accounts or network changed. Reconnect to review a fresh funding plan. Your search is still here.");
     flushWalletReset();
+  }
+
+  async function submitShopping(message: string, clearDraft: boolean) {
+    const body = await request("/api/shop", { sessionId: session?.sessionId, message }, "Finding real products for you…");
+    if (body && clearDraft) { setDraft(""); setFundingMint(null); }
   }
 
   async function search(event: FormEvent) {
     event.preventDefault();
     if (!draft.trim()) return;
-    const body = await request("/api/shop", { sessionId: session?.sessionId, message: draft }, "Finding real products for you…");
-    if (body) { setDraft(""); setFundingMint(null); }
+    await submitShopping(draft, true);
   }
 
   async function selectOffer(offerId: string, mode = walletMode, nextAddress = address, mint = fundingMint, signatureAvailable?: boolean, quantity?: number) {
@@ -156,7 +235,7 @@ export function ShopApp() {
     const wallets = discoverStandardWallets(window);
     if (!chosen && wallets.length > 1) { setWalletChoices([...wallets]); return; }
     const wallet = chosen ?? wallets[0];
-    if (!wallet) { setError("No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect. Connecting requests no message or transaction signature."); return; }
+    if (!wallet) { setError(isAndroidShell(window.navigator.userAgent) ? walletFailureMessage("unavailable") : "No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect. Connecting requests no message or transaction signature."); return; }
     setWalletChoices([]);
     lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
@@ -176,7 +255,7 @@ export function ShopApp() {
         setAddress(connected.address);
         setWalletMode("connected");
       }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "The wallet did not connect."); }
+    } catch (caught) { setError(walletFailureMessage(classifyWalletFailure(caught))); }
     finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
@@ -225,7 +304,11 @@ export function ShopApp() {
       else setWalletSigned(true);
       setNow(currentTime()); setWalletChallenge(null);
     } catch (caught) {
-      if (epoch === walletEpoch.current) { setWalletChallenge(null); setError(caught instanceof Error ? caught.message : "Your wallet check was canceled."); }
+      if (epoch === walletEpoch.current) {
+        setWalletChallenge(null);
+        const failure = classifyWalletFailure(caught);
+        setError(failure === "failed" && caught instanceof Error ? caught.message : walletFailureMessage(failure));
+      }
     } finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
@@ -257,7 +340,11 @@ export function ShopApp() {
       if (epoch !== walletEpoch.current) return;
       latestSession.current = body; setSession(body); setNow(currentTime()); setDevnetCheck(null);
     } catch (caught) {
-      if (epoch === walletEpoch.current) { setDevnetCheck(null); setError(caught instanceof Error ? caught.message : "Your devnet check was canceled."); }
+      if (epoch === walletEpoch.current) {
+        setDevnetCheck(null);
+        const failure = classifyWalletFailure(caught);
+        setError(failure === "failed" && caught instanceof Error ? caught.message : walletFailureMessage(failure));
+      }
     } finally { lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
@@ -294,6 +381,8 @@ export function ShopApp() {
 
   return <main className="app-shell">
     <nav className="topbar" aria-label="Main navigation"><Link className="wordmark" href="/" aria-label="SuperTab home"><span className="brand-icon">s<span>↗</span></span>SuperTab<span className="beta">DEMO</span></Link><Link href="/devnet">Devnet test product</Link><span className="demo-note"><span className="status-dot" />Explore freely. Money stays put.</span></nav>
+    {offline && <p className="notice warning" role="status">You are offline. Search and balance reads need a connection. Nothing was charged.</p>}
+    {androidShell && <p className="android-note">Android app. Connecting a wallet reads balances and does not move funds.</p>}
     <div className={`workspace ${purchase ? "has-review" : ""}`}>
       <section className="shopping">
         <header className={`hero ${session ? "compact" : ""}`}>
@@ -315,7 +404,7 @@ export function ShopApp() {
           onUseReadOnly={() => { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; walletDesk.current = null; walletEpoch.current++; setWalletSigned(false); setWalletChallenge(null); setCanSignMessage(false); setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
         />
         <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />
-        <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={2000} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>✦ {session ? "Your earlier requirements stay with us" : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
+        <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={SHOPPING_MESSAGE_LIMIT} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>{draft.length}/{SHOPPING_MESSAGE_LIMIT}. {session ? "A message that starts with Find starts a new search. Your shortlist stays." : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
         {!session && <div className="wallet-control"><p className="section-copy">Connect to review your wallet and quotes. Connection requests no signature and approves no payment. Wallet control proof is optional and separate.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
           {walletMode === "connected" && <><p>Connected wallet: {address}. Control proof {walletSigned ? "verified" : "not requested"}.</p>{!walletChallenge && !walletSigned && <button className="secondary" disabled={!!busy || !canSignMessage} onClick={() => void checkWalletControl()}>Review optional wallet control message</button>}</>}
           {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
@@ -324,17 +413,21 @@ export function ShopApp() {
         {!session && <div className="suggestions"><span>Try a little inspiration</span>{["Find me a black polo under $50.", "Find me running shoes under $120."].map(prompt => <button key={prompt} disabled={!!busy} onClick={() => setDraft(prompt)}>{prompt.replace("Find me ", "").replace(".", "")} <span aria-hidden="true">↗</span></button>)}</div>}
         {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}<span className="loading-hint">Live providers can take a moment.</span></div>}
         {error && <div className="notice warning" role="alert">{error}<button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div>}
+        {note && <p id="shopping-note" className="section-copy" role="status" tabIndex={-1}>{note}</p>}
         {session ? <section className="results" aria-label="Shopping results" aria-busy={!!busy}>
           <div className="conversation"><span className="assistant-mark">✦</span><div><p className="eyebrow">SUPERTAB FINDS</p><p>{session.assistantMessage}</p></div></div>
-          <div className="requirements"><span>Looking for</span><strong>{session.constraintsLabel}</strong></div>
+          <div className="requirements"><span>Looking for</span><strong>{session.constraintsLabel}</strong><button type="button" className="secondary" disabled={!!busy} onClick={() => { setDraft("Find "); document.getElementById("request")?.focus(); }}>New search</button></div>
+          <RequirementControls constraints={session.constraints} disabled={!!busy} onApply={(message) => void submitShopping(message, false)} />
           <details className="conversation-history"><summary>Your conversation · {session.messages.filter(message => message.role === "user").length} requests</summary>{session.messages.map((message, index) => <p key={index}><strong>{message.role === "user" ? "You" : "SuperTab"}</strong> {message.text}</p>)}</details>
-          <div className="results-heading"><h2>{session.exact.length ? "Your shortlist" : "Let’s widen the search"}</h2><span>{session.exact.length} matches · real merchant listings</span></div>
-          {session.exact.length ? <div className="product-grid">{session.exact.map(offer => <OfferCard key={offer.id} offer={offer} selected={offer.id === session.selectedOfferId} disabled={!!busy} onSelect={() => void selectOffer(offer.id, walletMode, address, null)} />)}</div> : <div className="empty-state"><span>⌕</span><h3>No exact matches yet</h3><p>Try another color, a higher budget, or fewer requirements. We’ll keep the rest of your request.</p><button className="secondary" disabled={!!busy} onClick={() => { setDraft("Navy is fine too."); document.getElementById("request")?.focus(); }}>Try navy too</button></div>}
-          {session.excluded.length > 0 && <details className="excluded"><summary>{session.excluded.length} other listings · missing a requirement</summary><div className="product-grid">{session.excluded.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} />)}</div></details>}
+          <ShortlistPanel currentIds={new Set([...session.exact, ...session.uncertain].map(item => "offer" in item ? item.offer.id : item.id))} onReview={(id) => void selectOffer(id, walletMode, address, null)} onRefind={(title) => { setDraft(`Find ${title}`); document.getElementById("request")?.focus(); }} />
+          <div className="results-heading"><h2>{session.exact.length ? "Good finds for you" : "Let’s widen the search"}</h2><span>{session.exact.length} confirmed matches</span></div>
+          {session.exact.length ? <div className="product-grid">{session.exact.map(offer => <OfferCard key={offer.id} offer={offer} selected={offer.id === session.selectedOfferId} disabled={!!busy} onSelect={() => void selectOffer(offer.id, walletMode, address, null)} onSave={() => { const text = saveOffer(offer); setNote(text); queueMicrotask(() => document.getElementById("shopping-note")?.focus()); }} />)}</div> : <div className="empty-state"><span>⌕</span><h3>No confirmed matches yet</h3><p>Nothing was dropped silently. Remove a requirement only if you want that restriction gone.</p>{emptyStateActions(session.constraints).map(action => <button key={action.label} className="secondary" type="button" disabled={!!busy} onClick={() => void submitShopping(action.message, false)}>{action.label}</button>)}</div>}
+          {session.uncertain.length > 0 && <details className="excluded" open><summary>{session.uncertain.length} listings · requirement not confirmed</summary><div className="product-grid">{session.uncertain.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} disabled={!!busy} onSelect={() => void selectOffer(item.offer.id, walletMode, address, null)} onSave={() => { const text = saveOffer(item.offer); setNote(text); queueMicrotask(() => document.getElementById("shopping-note")?.focus()); }} />)}</div></details>}
+          {session.excluded.length > 0 && <details className="excluded"><summary>{session.excluded.length} other listings · a requirement conflicts</summary><div className="product-grid">{session.excluded.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} />)}</div></details>}
         </section> : <section className="intro-steps" aria-label="How SuperTab works"><div><span>01 / DISCOVER</span><h2>Ask for what you love.</h2><p>Real finds from Shopify and eBay, shaped around your preferences.</p></div><div><span>02 / PLAN</span><h2>Put your assets in context.</h2><p>See your USDC balance and a live conversion quote for the difference.</p></div><div><span>03 / REVIEW</span><h2>You stay in control.</h2><p>Review an unsigned transaction. This demo stops before money moves.</p></div></section>}
       </section>
       {purchase && <aside className="purchase-review" ref={reviewRef} aria-label="Purchase review" aria-busy={!!busy}>
-        <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Let’s make a plan.</h2><span className="badge">Purchase review</span></div>
+        <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Cost &amp; funding</h2><span className="badge">Purchase review</span></div>
         <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
         <div className="price-summary"><span>{checkoutVerified ? "Final merchant checkout total" : checkoutCalculated ? "Merchant-calculated total · can still change" : `Item ${purchase.checkout.itemKind === "catalog" ? "catalog" : purchase.checkout.itemKind === "merchant_checkout" ? "merchant" : "listing"} price`}</span><strong>{checkoutVerified || checkoutCalculated ? purchase.checkout.merchantTotalDisplay : purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · {checkoutVerified ? "current merchant terms" : checkoutCalculated ? "not approvable until the merchant marks checkout ready" : "final total pending"}</p></div>
         <label className="asset-select">Quantity<select aria-label="Product quantity" disabled={!!busy} value={purchase.checkout.quantity}
@@ -347,7 +440,9 @@ export function ShopApp() {
           onApprove={() => request("/api/purchase/intent", { sessionId: session!.sessionId, termsId: purchase.termsId }, "Recording approval of these purchase terms…")} />
         <details className="review-details"><summary>Price breakdown</summary><Row label="Items" value={purchase.checkout.itemDisplay ?? "Unknown"} /><Row label="Shipping" value={purchase.checkout.shippingDisplay ?? "Not yet known"} /><Row label="Tax" value={purchase.checkout.taxDisplay ?? "Not yet known"} /><Row label="Other fees" value={purchase.checkout.feeDisplay ?? "None reported"} /><Row label="Discount" value={purchase.checkout.discountDisplay ?? "None reported"} /><p>{purchase.checkout.note}</p></details>
         <Block step="1" title="Your spending assets"><p className="section-copy">Read your wallet to see how this purchase could be funded.</p>
-          <div className="wallet-actions"><button className="secondary" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "address", DEMO_ADDRESS, null)}>Use real demo wallet <span>Read-only</span></button><div className="wallet-options"><button disabled={!!busy} onClick={() => setShowAddressInput(value => !value)}>Enter address</button><button disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button><button disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "sample", "", null)}>Sample preview</button></div></div>
+          <details className="review-details"><summary>Explore without connecting</summary>
+            <div className="wallet-actions"><button className="secondary merchant-handoff" disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "address", DEMO_ADDRESS, null)}>Demo wallet · read-only</button><div className="wallet-options"><button disabled={!!busy} onClick={() => setShowAddressInput(value => !value)}>Enter address</button><button disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button><button disabled={!!busy} onClick={() => void selectOffer(session!.selectedOfferId!, "sample", "", null)}>Sample preview</button></div></div>
+          </details>
           {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}
           <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
           {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
@@ -398,8 +493,8 @@ export function ShopApp() {
   </main>;
 }
 
-function OfferCard({ offer, selected, disabled, onSelect, reasons }: { offer: OfferView; selected?: boolean; disabled?: boolean; onSelect?: () => void; reasons?: string[] }) {
-  return <article className={`product-card ${selected ? "selected" : ""}`}><div className="product-image-wrap"><ProductImage offer={offer} /><span className="source-tag">{offer.source === "shopify" ? "Shopify" : "eBay"}</span>{selected && <span className="selected-tag">✓ Selected</span>}</div><div className="product-info"><p className="merchant">{offer.merchant ?? "Independent merchant"}</p><h3>{offer.title}</h3><p className="variant">{[offer.variantLabel, offer.condition].filter(Boolean).join(" · ") || "Variant not specified"}</p><div className="product-price"><strong>{offer.priceDisplay ?? "Price unknown"}</strong><span>{offer.availability === "in_stock" ? "In stock" : "Stock unconfirmed"}</span></div><p className="price-note">{offer.priceKind === "catalog" ? "Catalog" : "Listing"} price · shipping & tax may apply</p>{reasons && <p className="inline-error">{reasons.join(" ")}</p>}{onSelect && <button className={selected ? "secondary" : "primary"} disabled={disabled} onClick={onSelect}>{selected ? "Review selected product" : "Make a purchase plan"}<span aria-hidden="true">↗</span></button>}</div></article>;
+function OfferCard({ offer, selected, disabled, onSelect, onSave, reasons }: { offer: OfferView; selected?: boolean; disabled?: boolean; onSelect?: () => void; onSave?: () => void; reasons?: string[] }) {
+  return <article className={`product-card ${selected ? "selected" : ""}`}><div className="product-image-wrap"><ProductImage offer={offer} /><span className="source-tag">{offer.source === "shopify" ? "Shopify" : "eBay"}</span>{selected && <span className="selected-tag">✓ Selected</span>}</div><div className="product-info"><p className="merchant">{offer.merchant ?? "Independent merchant"}</p><h3>{offer.title}</h3><p className="variant">{[offer.variantLabel, offer.condition].filter(Boolean).join(" · ") || "Variant not specified"}</p><div className="product-price"><strong>{offer.priceDisplay ?? "Price unknown"}</strong><span>{offer.availability === "in_stock" ? "In stock" : offer.availability === "out_of_stock" ? "Out of stock" : "Stock not returned"}</span></div><p className="price-note">{offer.priceKind === "catalog" ? "Catalog" : offer.priceKind === "listing" ? "Listing" : "Item"} price · shipping {offer.shippingDisplay ?? "not returned"} · tax not returned</p><EvidenceList evidence={offer.evidence} />{reasons && <p className="inline-error">{reasons.join(" ")}</p>}{onSave && <button className="secondary" type="button" disabled={disabled} onClick={onSave}>Save to shortlist</button>}{onSelect && <button className={selected ? "secondary" : "primary"} disabled={disabled} onClick={onSelect}>{selected ? "View purchase review" : "Review purchase"}<span aria-hidden="true">↗</span></button>}{offer.merchantReviewUrl && <a href={offer.merchantReviewUrl} target="_blank" rel="noopener noreferrer">Open merchant page. This does not pay or place an order.</a>}</div></article>;
 }
 function ProductImage({ offer }: { offer: OfferView }) {
   const [failed, setFailed] = useState(false);

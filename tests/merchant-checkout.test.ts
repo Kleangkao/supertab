@@ -322,4 +322,19 @@ describe("checkout, funding and approval integration", () => {
     const changed = await service.review({ ...selection, quantity: 2 });
     expect(changed.purchase).toMatchObject({ finalTotal: "unknown", purchaseApproval: "required", checkout: { quantity: 2 } });
   });
+
+  it("drops an approval when a later ready total is different", async () => {
+    const { service, change } = setup();
+    const search = await service.converse(null, "Find me a black polo under $50");
+    const review = await service.review({ sessionId: search.sessionId, offerId: search.exact[0]!.id, walletMode: "none" });
+    const verified = await service.verifyMerchantTotal(search.sessionId, review.purchase!.termsId, checkoutId, BUYER_IP);
+    await service.approvePurchase(search.sessionId, verified.purchase!.termsId);
+    const next = checkout();
+    next.totals.find(entry => entry.type === "tax")!.amount = 150;
+    next.totals.find(entry => entry.type === "total")!.amount = 1800;
+    change(next);
+    const repriced = await service.verifyMerchantTotal(search.sessionId, verified.purchase!.termsId, checkoutId, BUYER_IP);
+    expect(repriced.purchase).toMatchObject({ purchaseApproval: "required", checkout: { merchantTotalDisplay: "$18.00" }, orderStatus: "ORDER_NOT_CREATED" });
+    await expect(service.approvePurchase(search.sessionId, verified.purchase!.termsId)).rejects.toThrow(/terms changed/);
+  });
 });

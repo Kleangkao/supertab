@@ -81,7 +81,7 @@ export async function proxyBroadcast(signedTransaction: string): Promise<Respons
 
 async function proxy(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<Response> {
   try {
-    const response = await fetch(new URL(path, merchantBaseUrl()), { ...init, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetch(new URL(path, merchantBaseUrl()), { ...withControl(init), cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
     return Response.json(await response.json() as unknown, { status: response.status });
   } catch (error) {
     return merchantError(error, "The local devnet merchant is not running.");
@@ -90,8 +90,17 @@ async function proxy(path: string, init?: RequestInit, timeoutMs = 20_000): Prom
 
 function merchantError(error: unknown, fallback: string): Response {
   const message = error instanceof Error ? error.message : fallback;
-  const down = /fetch failed|ECONNREFUSED|not running|timeout/i.test(message);
-  return Response.json({ error: down ? "The local devnet merchant is not running." : message }, { status: down ? 503 : 400 });
+  const down = /fetch failed|ECONNREFUSED|not running|timeout|unavailable/i.test(message);
+  const hosted = !/127\.0\.0\.1|localhost/i.test(merchantBaseUrl());
+  const downMessage = hosted ? "The devnet merchant is unavailable." : "The local devnet merchant is not running.";
+  return Response.json({ error: down ? downMessage : message }, { status: down ? 503 : 400 });
+}
+
+function withControl(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  const token = process.env.SUPERTAB_CONTROL_TOKEN?.trim();
+  if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
+  return { ...init, headers };
 }
 
 function bytesFromBase64(value: string): Uint8Array | null {

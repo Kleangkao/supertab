@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { associatedTokenAddress } from "../merchant/ata";
 import { generateSolanaKey, signBytes, type SolanaKey } from "../merchant/keys";
 import { compile } from "../merchant/transaction";
-import { runPurchaseAttempt, createPurchaseTransports, type PurchaseTransports } from "../src/lib/purchase-execution";
+import { executeDigitalPurchase, runPurchaseAttempt, createPurchaseTransports, type PurchaseTransports } from "../src/lib/purchase-execution";
 import { COMPUTE_BUDGET_PROGRAM, DFLOW_SWAP_PROGRAM } from "../src/lib/conversion-review";
 import { bitcoinAnchorBuyUrl, bitcoinAnchorDigest, parseSolanaExactTerms, REVIEWED_FEE_PAYER, REVIEWED_MERCHANT_RECIPIENT, SOLANA_MAINNET_CAIP } from "../src/lib/digital-purchase";
 import { PurchaseJournal } from "../src/lib/purchase-journal";
-import { acceptApproval, createReview, type BoundTerms } from "../src/lib/purchase-workflow";
+import { acceptApproval, createReview, mainnetExecutionGate, type BoundTerms } from "../src/lib/purchase-workflow";
 import { USDC_MINT, WSOL_MINT } from "../src/lib/tokens";
 import { TOKEN_PROGRAM } from "../merchant/product";
 import { FinancialExecutionDisabled } from "../src/lib/execution";
@@ -192,6 +192,49 @@ describe("purchase execution adapters", () => {
     expect(calls.send).toBe(0);
     expect(calls.payment).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("stops the purchase execute route before a journal or transport when the gate is off", async () => {
+    const previous = process.env.SUPERTAB_MAINNET_EXECUTION;
+    delete process.env.SUPERTAB_MAINNET_EXECUTION;
+    let openedJournal = false;
+    let openedTransport = false;
+    const request = new Request("http://127.0.0.1:3000/api/digital-purchase/execute", {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:3000", "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "submit_payment",
+        attemptId: "st-release-gate",
+        wallet: "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg",
+        execute: true,
+        approved: true,
+        signedTransaction: Buffer.alloc(80, 1).toString("base64"),
+      }),
+    });
+    try {
+      expect(mainnetExecutionGate({})).toBe("off");
+      const guarded = await executeDigitalPurchase(request.clone(), {
+        gate: () => mainnetExecutionGate({}),
+        journalFor: () => { openedJournal = true; throw new Error("journal opened"); },
+        transports: () => { openedTransport = true; throw new Error("transport opened"); },
+      });
+      expect(guarded.status).toBe(403);
+      const guardedBody = await guarded.json() as { executionGate?: string; error?: string; executionReady?: boolean };
+      expect(guardedBody.executionGate).toBe("off");
+      expect(guardedBody.executionReady).toBe(false);
+      expect(guardedBody.error).toMatch(/Financial execution is disabled: mainnet purchase execution/);
+      expect(openedJournal).toBe(false);
+      expect(openedTransport).toBe(false);
+
+      const route = await executeDigitalPurchase(request.clone());
+      expect(route.status).toBe(403);
+      const routeBody = await route.json() as { executionGate?: string; error?: string };
+      expect(routeBody.executionGate).toBe("off");
+      expect(routeBody.error).toMatch(/Financial execution is disabled: mainnet purchase execution/);
+    } finally {
+      if (previous == null) delete process.env.SUPERTAB_MAINNET_EXECUTION;
+      else process.env.SUPERTAB_MAINNET_EXECUTION = previous;
+    }
   });
 
   it("submits one sync swap, reconciles a lost response, and keeps a second request from sending", async () => {

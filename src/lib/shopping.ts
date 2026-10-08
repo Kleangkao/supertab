@@ -1,18 +1,34 @@
 import { createHash } from "node:crypto";
 import { readConfig, type AppConfig } from "./config";
-import { buildSearchQuery, describeConstraints, emptyConstraints, resolveConstraints, type ConstraintPatch, type ShoppingConstraints } from "./constraints";
+import { buildSearchQuery, describeConstraints, emptyConstraints, resolveConstraints, SHOPPING_MESSAGE_LIMIT, type ConstraintPatch, type ShoppingConstraints } from "./constraints";
 import { bindQuote, fetchPreparedTransaction, quoteInputForTargetOutput, type DflowClientOptions } from "./dflow";
 import { searchEbay } from "./ebay";
 import { knownPlanningMinor, planFunding, quoteIsUsable, type BoundQuote, type FundingPlan } from "./funding-planner";
 import { payableFromOffer, type NormalizedOffer, type PayableSnapshot } from "./offers";
 import { classifyOffers } from "./filter-offers";
+import { matchOffer } from "./match-evidence";
 import { transitionPurchase, type PurchaseState } from "./purchase";
 import { BridgeCardRail } from "./bridge-rail";
 import type { PaymentRailStatus } from "./card-rail";
-import { createPurchaseIntent, PurchaseApprovalError, PURCHASE_APPROVAL_TTL_MS, type PurchaseIntent } from "./purchase-intent";
+import { assertPurchasePayable, createPurchaseIntent, PurchaseApprovalError, PURCHASE_APPROVAL_TTL_MS, type PurchaseIntent } from "./purchase-intent";
 import { paymentStateFor, type OrderState } from "./payment-lifecycle";
 import { searchShopify } from "./shopify";
+import { fixtureProviders, fixturesEnabled } from "./shop-fixtures";
 import { extractConstraintPatch, GeminiBusyError } from "./gemini";
+import { createGeminiBudget, type GeminiBudget } from "./gemini-budget";
+import {
+  SESSION_TTL_MS,
+  SessionConflictError,
+  SessionExpiredError,
+  SessionStorageError,
+  createRemoteSessionStore,
+  decodeSnapshot,
+  encodeSnapshot,
+  isSnapshotExpired,
+  snapshotUpdatedAt,
+  type SessionStore,
+} from "./session-snapshot";
+export { SESSION_TTL_MS, SessionConflictError, SessionExpiredError, SessionStorageError };
 import {
   dflowInputMint,
   sampleSpendingAssets,
@@ -36,10 +52,14 @@ import type { DevnetSigningCheck } from "./devnet-memo";
 
 export const BALANCE_FRESHNESS_MS = 60_000;
 
+export { SHOPPING_MESSAGE_LIMIT };
+
 export interface ShoppingDependencies {
   config: AppConfig;
   fetchImpl?: typeof fetch;
   now?: () => Date;
+  sessionStore?: SessionStore | null;
+  geminiBudget?: GeminiBudget | null;
 }
 
 interface SessionRecord {
@@ -47,6 +67,7 @@ interface SessionRecord {
   messages: { role: "user" | "assistant"; text: string }[];
   constraints: ShoppingConstraints;
   offers: NormalizedOffer[];
+  uncertain: { id: string; reasons: string[] }[];
   excluded: { id: string; reasons: string[] }[];
   providers: ProviderNote[];
   assistantMessage: string;
@@ -74,6 +95,10 @@ interface SessionRecord {
   purchaseIntent: PurchaseIntent | null;
   unsignedTransaction: "not_requested" | "prepared";
   transactionVersion: "legacy" | "v0" | null;
+  persistedRevision: number;
+  updatedAtMs: number;
+  lastAcceptedTurnId: string | null;
+  lastAcceptedTurnText: string | null;
 }
 
 export class ShoppingService {
@@ -85,12 +110,22 @@ export class ShoppingService {
     this.rail = new BridgeCardRail(deps.config);
   }
 
-  async converse(sessionId: string | null, message: string): Promise<SessionView> {
+  async converse(sessionId: string | null, message: string, options?: { clientKey?: string; turnId?: string }): Promise<SessionView> {
     const text = message.trim();
     if (!text) throw new Error("Tell SuperTab what you want to buy.");
+    if (text.length > SHOPPING_MESSAGE_LIMIT) throw new Error("Keep the shopping request under 500 characters.");
+    if (sessionId && this.deps.sessionStore) await this.hydrate(sessionId, { force: true });
+    else if (sessionId) await this.hydrate(sessionId);
     const session = this.session(sessionId);
+    if (options?.turnId && session.lastAcceptedTurnId === options.turnId) {
+      if (session.lastAcceptedTurnText === text) return this.view(session);
+      throw new Error("This retry no longer matches the accepted request. Send it as a new message.");
+    }
     const previous = this.turns.get(session.id) ?? Promise.resolve();
-    const turn = previous.then(() => this.completeTurn(this.requireSession(session.id), text), () => this.completeTurn(this.requireSession(session.id), text));
+    const turn = previous.then(
+      () => this.completeTurn(this.requireSession(session.id), text, options?.clientKey, options?.turnId),
+      () => this.completeTurn(this.requireSession(session.id), text, options?.clientKey, options?.turnId),
+    );
     this.turns.set(session.id, turn);
     try {
       return await turn;
@@ -99,19 +134,97 @@ export class ShoppingService {
     }
   }
 
-  private async completeTurn(current: SessionRecord, text: string): Promise<SessionView> {
+  async hydrate(sessionId: string, options?: { force?: boolean }): Promise<void> {
+    if (!sessionId || !this.deps.sessionStore) return;
+    if (!options?.force && this.sessions.has(sessionId)) return;
+    if (sessionId.length <= 8 || sessionId.length > 80) return;
+    const raw = await this.deps.sessionStore.load(sessionId);
+    if (!raw) {
+      this.forgetLocal(sessionId);
+      return;
+    }
+    const updatedAt = snapshotUpdatedAt(raw);
+    if (isSnapshotExpired(updatedAt, this.nowMs())) {
+      this.forgetLocal(sessionId);
+      try { await this.deps.sessionStore.remove?.(sessionId); } catch { /* Best-effort cleanup. */ }
+      throw new SessionExpiredError();
+    }
+    let restored: ReturnType<typeof decodeSavedSession>;
+    try {
+      restored = decodeSavedSession(raw);
+    } catch {
+      this.forgetLocal(sessionId);
+      throw new Error("Shopping session could not be restored.");
+    }
+    if (restored.record.id !== sessionId) throw new Error("Shopping session could not be restored.");
+    const record = stripFinancialAuthority(restored.record);
+    this.sessions.set(sessionId, record);
+    this.excludedOffers.set(sessionId, restored.excluded);
+    this.uncertainOffers.set(sessionId, restored.uncertain);
+  }
+
+  async forget(sessionId: string): Promise<void> {
+    this.forgetLocal(sessionId);
+    if (this.deps.sessionStore?.remove) await this.deps.sessionStore.remove(sessionId);
+  }
+
+  private forgetLocal(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    this.excludedOffers.delete(sessionId);
+    this.uncertainOffers.delete(sessionId);
+    this.turns.delete(sessionId);
+  }
+
+  private async completeTurn(current: SessionRecord, text: string, clientKey?: string, turnId?: string): Promise<SessionView> {
+    if (turnId && current.lastAcceptedTurnId === turnId) {
+      if (current.lastAcceptedTurnText === text) return this.view(current);
+      throw new Error("This retry no longer matches the accepted request. Send it as a new message.");
+    }
+    const previousExcluded = this.excludedOffers.get(current.id);
+    const previousUncertain = this.uncertainOffers.get(current.id);
     const session: SessionRecord = { ...current, messages: [...current.messages],
       selectedOfferId: null, snapshot: null, plan: null, quote: null, swapApproval: null,
       checkoutEvidence: null, termsId: crypto.randomUUID(), walletChallenge: null, walletProof: null, devnetCheck: null, devnetSigning: null,
-      purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING" };
+      purchaseIntent: null, unsignedTransaction: "not_requested", transactionVersion: null, state: "DISCOVERING",
+      balances: [], balanceSource: "none", balanceError: null, balanceReadAtMs: null };
     this.sessions.set(session.id, session);
+    try {
+      await this.finishTurn(session, text, clientKey);
+      if (turnId) {
+        session.lastAcceptedTurnId = turnId;
+        session.lastAcceptedTurnText = text;
+      }
+      session.updatedAtMs = this.nowMs();
+      await this.persist(session);
+      return this.view(session);
+    } catch (error) {
+      if (this.sessions.get(session.id) === session) {
+        this.sessions.set(session.id, current);
+        if (previousExcluded) this.excludedOffers.set(session.id, previousExcluded);
+        else this.excludedOffers.delete(session.id);
+        if (previousUncertain) this.uncertainOffers.set(session.id, previousUncertain);
+        else this.uncertainOffers.delete(session.id);
+      }
+      if (error instanceof SessionConflictError && this.deps.sessionStore) {
+        try { await this.hydrate(current.id, { force: true }); } catch { /* Keep rolled-back local state. */ }
+      }
+      throw error;
+    }
+  }
+
+  private async finishTurn(session: SessionRecord, text: string, clientKey?: string): Promise<SessionView> {
     session.messages.push({ role: "user", text });
-    const gemini = await this.modelPatch(session, text);
+    const useFixtures = fixturesEnabled();
+    const gemini = useFixtures
+      ? { patch: null, status: "not_configured" as const }
+      : await this.modelPatch(session, text, clientKey);
     session.constraints = resolveConstraints(session.constraints, text, gemini.patch);
     session.gemini = gemini.status;
     const query = buildSearchQuery(session.constraints);
     const shipTo = session.constraints.shipToCountry ?? this.deps.config.shopifyShipTo;
-    const [shopify, ebay] = await Promise.all([
+    const [shopify, ebay] = useFixtures
+      ? fixtureProviders(text)
+      : await Promise.all([
       searchShopify({
         query: query || text,
         maxPriceCents: session.constraints.maxPriceCents,
@@ -140,8 +253,10 @@ export class ShoppingService {
     const classified = classifyOffers([...shopify.offers, ...ebay.offers], session.constraints);
     if (this.sessions.get(session.id) !== session) return this.view(this.requireSession(session.id));
     session.offers = classified.exact;
+    session.uncertain = classified.uncertain.map((item) => ({ id: item.offer.id, reasons: item.reasons }));
     session.excluded = classified.excluded.map((item) => ({ id: item.offer.id, reasons: item.reasons }));
     this.rememberExcluded(session, classified.excluded.map((item) => item.offer));
+    this.rememberUncertain(session, classified.uncertain.map((item) => item.offer));
     session.providers = [shopify, ebay].map((result) => ({
       provider: result.provider,
       status: result.status,
@@ -156,11 +271,13 @@ export class ShoppingService {
     session.assistantMessage = assistantCopy({
       constraints: session.constraints,
       exact: classified.exact.length,
+      uncertain: classified.uncertain.length,
       excluded: classified.excluded.length,
       providers: session.providers,
       gemini: session.gemini,
     });
     session.messages.push({ role: "assistant", text: session.assistantMessage });
+    session.messages = session.messages.slice(-12);
     return this.view(session);
   }
 
@@ -173,14 +290,17 @@ export class ShoppingService {
     fundingMint?: string | null;
     signatureAvailable?: boolean;
   }): Promise<SessionView> {
+    if (this.deps.sessionStore) await this.hydrate(input.sessionId, { force: true });
+    else await this.hydrate(input.sessionId);
     // Each review owns a separate working record. A slower wallet/quote read
     // must never mutate a newer review (including a clear-wallet action).
     const current = this.requireSession(input.sessionId);
     const session: SessionRecord = { ...current, balances: [] as AssetBalance[],
       balanceSource: "none" as PurchaseView["balanceSource"], balanceError: null,
       walletAddress: null, plan: null, swapApproval: null, state: "OFFER_SELECTED" as PurchaseState };
+    const uncertain = this.uncertainOffers.get(session.id);
     const excluded = this.excludedOffers.get(session.id);
-    const offer = session.offers.find((item) => item.id === input.offerId) ?? excluded?.get(input.offerId);
+    const offer = session.offers.find((item) => item.id === input.offerId) ?? uncertain?.get(input.offerId) ?? excluded?.get(input.offerId);
     if (!offer) throw new Error("That product is no longer in this search. Search again.");
     if (session.excluded.some((item) => item.id === offer.id)) {
       throw new Error("That listing misses a requirement, so it cannot be selected.");
@@ -242,6 +362,15 @@ export class ShoppingService {
     session.transactionVersion = prepared.version;
     if (prepared.status === "prepared" && session.state === "SWAP_QUOTE_READY") {
       session.state = transitionPurchase(session.state, "AWAITING_SWAP_APPROVAL");
+    }
+    session.updatedAtMs = this.nowMs();
+    try {
+      await this.persist(session);
+    } catch (error) {
+      if (error instanceof SessionConflictError && this.deps.sessionStore) {
+        try { await this.hydrate(session.id, { force: true }); } catch { /* Keep working copy until the client refreshes. */ }
+      }
+      throw error;
     }
     return this.view(session);
   }
@@ -393,6 +522,7 @@ export class ShoppingService {
       merchantReference: offer.productUrl,
       productTitle: offer.title,
       variant: offer.variantLabel,
+      sourceItemId: offer.sourceItemId,
       reviewedAmountMinor: amount,
       maximumAuthorizedAmountMinor: amount,
       currency: session.snapshot?.currency ?? "USD",
@@ -407,6 +537,7 @@ export class ShoppingService {
   private selectedOffer(session: SessionRecord): NormalizedOffer | null {
     if (!session.selectedOfferId) return null;
     return session.offers.find((item) => item.id === session.selectedOfferId)
+      ?? this.uncertainOffers.get(session.id)?.get(session.selectedOfferId)
       ?? this.excludedOffers.get(session.id)?.get(session.selectedOfferId)
       ?? null;
   }
@@ -535,8 +666,9 @@ export class ShoppingService {
     return balances.find((balance) => balance.kind === "native") ?? null;
   }
 
-  private async modelPatch(session: SessionRecord, message: string): Promise<{ patch: ConstraintPatch | null; status: SessionView["gemini"] }> {
+  private async modelPatch(session: SessionRecord, message: string, clientKey = "local"): Promise<{ patch: ConstraintPatch | null; status: SessionView["gemini"] }> {
     if (!this.deps.config.geminiApiKey) return { patch: null, status: "not_configured" };
+    if (this.deps.geminiBudget && !await this.deps.geminiBudget.reserve(clientKey)) return { patch: null, status: "busy" };
     try {
       const patch = await extractConstraintPatch({
         apiKey: this.deps.config.geminiApiKey,
@@ -549,6 +681,37 @@ export class ShoppingService {
       return { patch, status: patch ? "used" : "fallback" };
     } catch (error) {
       return { patch: null, status: error instanceof GeminiBusyError ? "busy" : "fallback" };
+    }
+  }
+
+  private async persist(session: SessionRecord): Promise<void> {
+    if (!this.deps.sessionStore) return;
+    this.pruneLocalSessions();
+    const expected = session.persistedRevision ?? 0;
+    const updatedAtMs = session.updatedAtMs || this.nowMs();
+    session.updatedAtMs = updatedAtMs;
+    const body = encodeSnapshot({
+      version: 1,
+      revision: expected + 1,
+      updatedAtMs,
+      record: {
+        ...stripFinancialAuthorityForStorage(session),
+        messages: session.messages.slice(-12),
+        persistedRevision: expected + 1,
+        updatedAtMs,
+      },
+      excluded: [...(this.excludedOffers.get(session.id)?.entries() ?? [])],
+      uncertain: [...(this.uncertainOffers.get(session.id)?.entries() ?? [])],
+    });
+    if (body.length > 180_000) throw new Error("Shopping session could not be saved.");
+    await this.deps.sessionStore.save(session.id, body, expected);
+    session.persistedRevision = expected + 1;
+  }
+
+  private pruneLocalSessions(): void {
+    const now = this.nowMs();
+    for (const [id, session] of this.sessions) {
+      if (isSnapshotExpired(session.updatedAtMs, now)) this.forgetLocal(id);
     }
   }
 
@@ -571,11 +734,18 @@ export class ShoppingService {
   }
 
   private excludedOffers = new Map<string, Map<string, NormalizedOffer>>();
+  private uncertainOffers = new Map<string, Map<string, NormalizedOffer>>();
 
   private rememberExcluded(session: SessionRecord, offers: NormalizedOffer[]): void {
     const map = new Map<string, NormalizedOffer>();
     for (const offer of offers) map.set(offer.id, offer);
     this.excludedOffers.set(session.id, map);
+  }
+
+  private rememberUncertain(session: SessionRecord, offers: NormalizedOffer[]): void {
+    const map = new Map<string, NormalizedOffer>();
+    for (const offer of offers) map.set(offer.id, offer);
+    this.uncertainOffers.set(session.id, map);
   }
 
   private view(session: SessionRecord): SessionView {
@@ -607,16 +777,35 @@ export class ShoppingService {
       }
     }
     const excludedOffers = this.excludedOffers.get(session.id) ?? new Map<string, NormalizedOffer>();
+    const uncertainOffers = this.uncertainOffers.get(session.id) ?? new Map<string, NormalizedOffer>();
     const rail: PaymentRailStatus = this.rail.status();
+    const consent = consentState(session, offer, this.nowMs());
+    const present = (item: NormalizedOffer) => {
+      const view = toOfferView(item, item.id === session.selectedOfferId ? session.quantity : 1);
+      const assessment = matchOffer(item, session.constraints);
+      return { ...view, evidence: assessment.evidence.map(({ attribute, status, detail }) => ({ attribute, status, detail })) };
+    };
     return {
       sessionId: session.id,
       assistantMessage: session.assistantMessage,
       constraintsLabel: describeConstraints(session.constraints) || "No constraints yet",
+      constraints: {
+        productQuery: session.constraints.productQuery,
+        colors: session.constraints.colors,
+        sizes: session.constraints.sizes,
+        maxPriceCents: session.constraints.maxPriceCents?.toString() ?? null,
+        condition: session.constraints.condition,
+        shipToCountry: session.constraints.shipToCountry,
+      },
       messages: session.messages,
-      exact: session.offers.map(item => toOfferView(item, item.id === session.selectedOfferId ? session.quantity : 1)),
+      exact: session.offers.map(present),
+      uncertain: (session.uncertain ?? []).flatMap((item) => {
+        const held = uncertainOffers.get(item.id);
+        return held ? [{ offer: present(held), reasons: item.reasons }] : [];
+      }),
       excluded: session.excluded.flatMap((item) => {
-        const offer = excludedOffers.get(item.id);
-        return offer ? [{ offer: toOfferView(offer, offer.id === session.selectedOfferId ? session.quantity : 1), reasons: item.reasons }] : [];
+        const held = excludedOffers.get(item.id);
+        return held ? [{ offer: present(held), reasons: item.reasons }] : [];
       }),
       providers: session.providers,
       gemini: session.gemini,
@@ -666,13 +855,13 @@ export class ShoppingService {
           source: (session.offers.find((item) => item.id === session.selectedOfferId))?.source ?? "shopify",
         },
         swapApproval: session.swapApproval,
-        purchaseApproval: approvalLabel(session.purchaseIntent, this.nowMs()),
+        purchaseApproval: approvalLabel(consent),
         paymentStatus: paymentStateFor({
           hasOffer: true,
           finalTotalKnown: session.snapshot.merchantTotalKnown,
           fundsReady: session.balanceSource === "chain" && session.plan?.readiness === "covered_by_usdc",
-          approved: session.purchaseIntent != null,
-          expired: session.purchaseIntent != null && this.nowMs() >= Date.parse(session.purchaseIntent.expiresAt),
+          approved: consent === "current",
+          expired: consent === "expired",
           railReady: rail.availability === "ready" && rail.spendingAvailable,
         }),
         orderStatus: "ORDER_NOT_CREATED" satisfies OrderState,
@@ -693,6 +882,7 @@ function emptySession(id: string): SessionRecord {
     messages: [],
     constraints: emptyConstraints(),
     offers: [],
+    uncertain: [],
     excluded: [],
     providers: [],
     assistantMessage: "",
@@ -720,17 +910,80 @@ function emptySession(id: string): SessionRecord {
     purchaseIntent: null,
     unsignedTransaction: "not_requested",
     transactionVersion: null,
+    persistedRevision: 0,
+    updatedAtMs: Date.now(),
+    lastAcceptedTurnId: null,
+    lastAcceptedTurnText: null,
   };
 }
 
-function approvalLabel(intent: PurchaseIntent | null, nowMs: number): "required" | "approved" | "expired" {
-  if (!intent) return "required";
-  return nowMs >= Date.parse(intent.expiresAt) ? "expired" : "approved";
+/** Restored snapshots keep product context only. Financial authority must be refreshed live. */
+function stripFinancialAuthority(record: SessionRecord): SessionRecord {
+  return {
+    ...record,
+    balances: [],
+    balanceSource: "none",
+    balanceError: null,
+    balanceReadAtMs: null,
+    quote: null,
+    plan: null,
+    purchaseIntent: null,
+    swapApproval: null,
+    walletChallenge: null,
+    walletProof: null,
+    devnetCheck: null,
+    devnetSigning: null,
+    unsignedTransaction: "not_requested",
+    transactionVersion: null,
+    checkoutEvidence: null,
+    snapshot: catalogSnapshotOnly(record),
+    state: record.selectedOfferId ? "OFFER_SELECTED" : "DISCOVERING",
+    signatureCapability: record.walletMode === "connected" ? "unavailable" : "disabled",
+    updatedAtMs: record.updatedAtMs ?? 0,
+    lastAcceptedTurnId: record.lastAcceptedTurnId ?? null,
+    lastAcceptedTurnText: record.lastAcceptedTurnText ?? null,
+    persistedRevision: record.persistedRevision ?? 0,
+  };
+}
+
+function stripFinancialAuthorityForStorage(session: SessionRecord): SessionRecord {
+  return stripFinancialAuthority(session);
+}
+
+function catalogSnapshotOnly(record: SessionRecord): SessionRecord["snapshot"] {
+  if (!record.selectedOfferId) return null;
+  const offer = record.offers.find((item) => item.id === record.selectedOfferId);
+  return offer ? payableFromOffer(offer, record.quantity) : null;
+}
+
+function approvalLabel(state: "none" | "current" | "expired" | "mismatch"): "required" | "approved" | "expired" {
+  if (state === "current") return "approved";
+  if (state === "expired") return "expired";
+  return "required";
+}
+
+function consentState(session: SessionRecord, offer: NormalizedOffer | null, nowMs: number): "none" | "current" | "expired" | "mismatch" {
+  const intent = session.purchaseIntent;
+  const amount = session.snapshot?.merchantTotalKnown ? session.snapshot.merchantTotalMinor : null;
+  if (!intent || amount == null || !offer) return "none";
+  try {
+    assertPurchasePayable(intent, amount, nowMs, {
+      productTitle: offer.title,
+      variant: offer.variantLabel,
+      currency: session.snapshot?.currency ?? "USD",
+      merchantReference: offer.productUrl,
+      sourceItemId: offer.sourceItemId,
+    });
+    return "current";
+  } catch (error) {
+    return error instanceof PurchaseApprovalError && /expired/i.test(error.message) ? "expired" : "mismatch";
+  }
 }
 
 function assistantCopy(input: {
   constraints: ShoppingConstraints;
   exact: number;
+  uncertain: number;
   excluded: number;
   providers: ProviderNote[];
   gemini: SessionView["gemini"];
@@ -744,14 +997,19 @@ function assistantCopy(input: {
         ? "I used the words in your message."
         : "I kept the requirements from your message.";
   const match = input.exact === 0
-    ? input.excluded > 0
-      ? "No listing matched every requirement."
-      : "No products came back from the stores that are connected."
+    ? input.uncertain > 0
+      ? "No listing confirmed every requirement. Some are missing evidence and are listed separately."
+      : input.excluded > 0
+        ? "No listing matched every requirement."
+        : "No products came back from the stores that are connected."
     : `I found ${input.exact} ${input.exact === 1 ? "listing that matches" : "listings that match"}${looking ? `: ${looking}` : ""}.`;
+  const missing = input.uncertain > 0 && input.exact > 0
+    ? `${input.uncertain} more ${input.uncertain === 1 ? "listing is" : "listings are"} missing evidence for a requirement.`
+    : "";
   const notes = input.providers
     .filter((provider) => provider.status !== "ok" && provider.message)
     .map((provider) => provider.message);
-  return [lead, match, ...notes].filter(Boolean).join(" ");
+  return [lead, match, missing, ...notes].filter(Boolean).join(" ");
 }
 
 const globalStore = globalThis as { __supertab?: ShoppingService; __supertabStamp?: string };
@@ -765,8 +1023,34 @@ export function getShoppingService(): ShoppingService {
   const config = readConfig();
   const stamp = configStamp(config);
   if (!globalStore.__supertab || globalStore.__supertabStamp !== stamp) {
-    globalStore.__supertab = new ShoppingService({ config });
+    globalStore.__supertab = new ShoppingService({
+      config,
+      sessionStore: createRemoteSessionStore(),
+      geminiBudget: createGeminiBudget(),
+    });
     globalStore.__supertabStamp = stamp;
   }
   return globalStore.__supertab;
+}
+
+function decodeSavedSession(raw: string): { record: SessionRecord; excluded: Map<string, NormalizedOffer>; uncertain: Map<string, NormalizedOffer> } {
+  const parsed = decodeSnapshot(raw) as {
+    version?: unknown;
+    revision?: unknown;
+    updatedAtMs?: unknown;
+    record?: SessionRecord;
+    excluded?: [string, NormalizedOffer][];
+    uncertain?: [string, NormalizedOffer][];
+  };
+  if (!parsed || parsed.version !== 1 || !parsed.record || typeof parsed.record.id !== "string" || !Array.isArray(parsed.record.messages)) {
+    throw new Error("Shopping session could not be restored.");
+  }
+  if (!Array.isArray(parsed.record.uncertain)) parsed.record.uncertain = [];
+  parsed.record.persistedRevision = typeof parsed.revision === "number" ? parsed.revision : parsed.record.persistedRevision ?? 0;
+  const updatedAt = typeof parsed.updatedAtMs === "number" ? parsed.updatedAtMs
+    : typeof parsed.record.updatedAtMs === "number" ? parsed.record.updatedAtMs : 0;
+  parsed.record.updatedAtMs = updatedAt;
+  parsed.record.lastAcceptedTurnId = typeof parsed.record.lastAcceptedTurnId === "string" ? parsed.record.lastAcceptedTurnId : null;
+  parsed.record.lastAcceptedTurnText = typeof parsed.record.lastAcceptedTurnText === "string" ? parsed.record.lastAcceptedTurnText : null;
+  return { record: parsed.record, excluded: new Map(parsed.excluded ?? []), uncertain: new Map(parsed.uncertain ?? []) };
 }

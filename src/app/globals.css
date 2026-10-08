@@ -103,7 +103,8 @@ a { color:inherit; }
 .product-price strong { font-size:20px; letter-spacing:-.7px; font-weight:600; }
 .product-price span { color:#70845d; font-size:10px; }
 .price-note { color:var(--muted); font-size:10px; line-height:1.5; margin:7px 0 16px; }
-.product-info button { width:100%; font-size:11px; }
+.product-info button { width:100%; font-size:11px; min-height:44px; }
+.product-info a,.merchant-handoff { display:inline-flex; align-items:center; min-height:44px; }
 .excluded { margin-top:24px; }
 .excluded .product-grid { margin-top:20px; }
 .empty-state { background:#eff3e9; border-radius:16px; padding:28px; text-align:center; }
@@ -139,7 +140,7 @@ a { color:inherit; }
 .wallet-actions>.secondary { width:100%; margin:6px 0 10px; font-size:12px; background:#f8faf5; }
 .wallet-actions>.secondary span { font-size:10px; color:var(--muted); }
 .wallet-options { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
-.wallet-options button { background:none; border:0; padding:0; text-decoration:underline; text-underline-offset:3px; color:var(--muted); font-size:10px; }
+.wallet-options button { background:none; border:0; padding:8px 0; text-decoration:underline; text-underline-offset:3px; color:var(--muted); font-size:14px; min-height:44px; }
 .address-form { display:flex; gap:6px; margin-bottom:15px; }
 .address-form input { width:0; min-width:0; flex:1; border:1px solid var(--line); border-radius:9px; padding:9px; font-size:11px; }
 .address-form button { font-size:10px; padding:9px; }

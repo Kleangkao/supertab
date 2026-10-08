@@ -1,5 +1,7 @@
 export type ItemCondition = "any" | "new" | "used";
 
+export const SHOPPING_MESSAGE_LIMIT = 500;
+
 export interface ShoppingConstraints {
   productQuery: string;
   requiredTerms: string[];
@@ -26,7 +28,7 @@ export interface ConstraintPatch {
   isNewSearch?: boolean;
 }
 
-const COLORS = [
+export const COLORS = [
   "black",
   "white",
   "navy",
@@ -52,7 +54,7 @@ const STOPWORDS = new Set([
   "under", "below", "size", "color", "colour", "in", "is", "fine", "too", "also",
   "instead", "just", "buy", "search", "i", "im", "am", "would", "like", "shop",
   "shopping", "can", "you", "actually", "but", "ok", "okay", "well", "ones", "one",
-  "those", "these", "make", "it", "them", "that", "this", "from", "any",
+  "those", "these", "make", "it", "them", "that", "this", "from", "any", "not",
 ]);
 
 export function emptyConstraints(): ShoppingConstraints {
@@ -96,19 +98,23 @@ export function mergeConstraints(current: ShoppingConstraints, message: string):
     if (price != null) next.maxPriceCents = price;
   }
 
-  const colors = extractColors(message);
+  const droppingColor = !fresh && /^\s*not\s+(?!size\b)/i.test(message);
+  const droppingSize = !fresh && /^\s*not size\b/i.test(message);
+  const colors = droppingColor || droppingSize ? [] : extractColors(message);
   const colorMode = listUpdateMode(message, colors.length > 0, "colou?r");
-  if (colorMode === "clear") next.colors = [];
+  if (droppingColor) next.colors = next.colors.filter((color) => !extractColors(message).includes(color));
+  else if (colorMode === "clear") next.colors = [];
   else if (colorMode === "replace" || fresh) next.colors = colors;
   else next.colors = unique([...next.colors, ...colors]);
 
-  const sizes = extractSizes(message);
+  const sizes = droppingSize ? [] : extractSizes(message);
   const sizeMode = listUpdateMode(message, sizes.length > 0, "size");
-  if (sizeMode === "clear") next.sizes = [];
+  if (droppingSize) next.sizes = next.sizes.filter((size) => !extractSizes(message).includes(size));
+  else if (sizeMode === "clear") next.sizes = [];
   else if (sizeMode === "replace" || fresh) next.sizes = sizes;
   else next.sizes = unique([...next.sizes, ...sizes]);
 
-  const condition = extractCondition(message);
+  const condition = /\bany condition\b/i.test(message) ? "any" : extractCondition(message);
   if (condition) next.condition = condition;
   else if (fresh) next.condition = "any";
 
@@ -223,8 +229,42 @@ export function describeConstraints(constraints: ShoppingConstraints): string {
   if (constraints.sizes.length > 0) bits.push(`size ${constraints.sizes.join(" or ")}`);
   if (constraints.maxPriceCents != null) bits.push(`at or under ${formatCents(constraints.maxPriceCents)}`);
   if (constraints.condition !== "any") bits.push(constraints.condition);
-  if (constraints.shipToCountry) bits.push(`shipping country ${constraints.shipToCountry}`);
+  if (constraints.shipToCountry) bits.push(`destination filter ${constraints.shipToCountry}, not a delivery promise`);
   return bits.join(", ");
+}
+
+export type RequirementChange =
+  | { kind: "clear-budget" }
+  | { kind: "set-budget"; dollars: string }
+  | { kind: "add-color"; color: string }
+  | { kind: "replace-color"; color: string }
+  | { kind: "remove-color"; color: string }
+  | { kind: "clear-colors" }
+  | { kind: "add-size"; size: string }
+  | { kind: "replace-size"; size: string }
+  | { kind: "remove-size"; size: string }
+  | { kind: "clear-sizes" }
+  | { kind: "condition"; condition: ItemCondition }
+  | { kind: "ship"; country: "US" | "TH" | "GB" };
+
+/** Controls submit the same sentences the conversation parser already understands. */
+export function requirementMessage(change: RequirementChange): string {
+  switch (change.kind) {
+    case "clear-budget": return "any budget";
+    case "set-budget": return `under $${change.dollars}`;
+    case "add-color": return `${change.color} is fine too`;
+    case "replace-color": return `${change.color} only`;
+    case "remove-color": return `not ${change.color}`;
+    case "clear-colors": return "any color";
+    case "add-size": return `size ${change.size} is fine too`;
+    case "replace-size": return `size ${change.size} only`;
+    case "remove-size": return `not size ${change.size}`;
+    case "clear-sizes": return "any size";
+    case "condition":
+      return change.condition === "any" ? "any condition" : change.condition === "new" ? "brand new" : "used";
+    case "ship":
+      return change.country === "TH" ? "ship to thailand" : change.country === "GB" ? "ship to uk" : "ship to united states";
+  }
 }
 
 function formatCents(cents: bigint): string {
@@ -284,7 +324,7 @@ function extractSizes(message: string): string[] {
   for (const match of withoutPrice.matchAll(numeric)) {
     if (match[1]) found.push(match[1]);
   }
-  const words = /\bsize\s+(xxs|xs|small|medium|large|xl|xxl|xxxl)\b/gi;
+  const words = /\bsize\s+(xxxl|xxl|xl|xxs|xs|small|medium|large|s|m|l)\b/gi;
   for (const match of withoutPrice.matchAll(words)) {
     if (match[1]) found.push(match[1].toLowerCase());
   }
@@ -320,8 +360,9 @@ function extractProductQuery(message: string): string {
   text = text.replace(/\$\s*\d+(?:\.\d{1,2})?/g, " ");
   text = text.replace(/\d+(?:\.\d{1,2})?\s*dollars?/gi, " ");
   text = text.replace(/\b(?:size|eu|us|uk)\s*#?\s*\d{1,2}(?:\.\d)?\b/gi, " ");
-  text = text.replace(/\bsize\s+(?:xxs|xs|small|medium|large|xl|xxl|xxxl)\b/gi, " ");
+  text = text.replace(/\bsize\s+(?:xxxl|xxl|xl|xxs|xs|small|medium|large|s|m|l)\b/gi, " ");
   text = text.replace(/\bship(?:ping)?\s+to\s+[a-z]{2,}\b/gi, " ");
+  text = text.replace(/\b(refurbished|pre-?owned|second[\s-]?hand|secondhand)\b/gi, " ");
   for (const color of COLORS) {
     text = text.replace(new RegExp(`(^|[^a-z])${color}([^a-z]|$)`, "gi"), " ");
   }
@@ -351,7 +392,7 @@ function replacesProduct(message: string): boolean {
 }
 
 function conditionMentioned(message: string): boolean {
-  return extractCondition(message) != null;
+  return /\bany condition\b/i.test(message) || extractCondition(message) != null;
 }
 
 function shipMentioned(message: string): boolean {

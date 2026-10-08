@@ -10,8 +10,10 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
 
 # next.js
 /.next/
@@ -44,6 +46,18 @@ dflow key.txt
 # vercel
 .vercel
 
+# hosted merchant build
+merchant/.wrangler/
+.dev.vars
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Android signing material and build output
+*.jks
+*.keystore
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
