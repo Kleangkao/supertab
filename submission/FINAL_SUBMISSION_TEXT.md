@@ -1,6 +1,6 @@
 # SuperTab — submission text
 
-Do not submit this form automatically. The authenticated CLOCK IN form was not opened, so extra fields are unverified. On 8 October 2026 the public desk page was a visual calendar and terminal; its HTML did not include the deadline. An earlier look at that calendar showed submissions close on 12 October 2026 at 6:59 PM GMT+7. Recheck the calendar before submitting. The announcement date of 8 October conflicts with that calendar.
+Do not submit this form automatically. The authenticated CLOCK IN form was not opened, so extra fields are unverified. On 9 October 2026 the public desk HTML still does not print a deadline. The live Align schedule returns submissionCloseDate 2026-10-12T23:59:00.000Z, which is 13 October 2026 at 06:59 Asia/Bangkok. An announcement still says submissions close on 8 October 2026. Use the Align timestamp, then recheck the authenticated form before submitting.
 
 ## Brief description (under 500 characters)
 
@@ -52,7 +52,7 @@ Build command, from `android/`, after loading the signing values from `%USERPROF
 
 ## Notes for judges (under 500 characters)
 
-On a physical Seeker, the installed app searched, refined, and reviewed a real $39.99 polo with shipping and tax unconfirmed. Mobile Wallet Adapter opened the Solana Mobile wallet, which then could not load the wallet, so a connected balance read is unverified. The devnet screen showed the existing refunded order. No funds were sent during this check.
+On 8 October 2026 a physical Seeker searched, refined, and reviewed a real $39.99 polo with shipping and tax unconfirmed. Mobile Wallet Adapter opened the Solana Mobile wallet, which then could not load the wallet, so a connected balance read is unverified. The 9 October rebuild is signed with the same certificate and has not been installed on a device. The APK loads the hosted site, which still uses the older merchant-link labels until that fix is deployed. No funds were sent.
 
 ## Team / contact
 
@@ -75,10 +75,27 @@ Project logo: the app icon is the SuperTab tab mark in `android/app/src/main/res
 ## APK
 
 - File: `submission/supertab-clockin.apk`
-- SHA-256: `72d7c78915c89668a2041e0412493a674d2b22086e04670e4cb5b4f395c6c1ca`
-- Size: 23,371,140 bytes
+- SHA-256: `c0fe8e1fece73cb650e1cdd65ffe7f86a220c883923f20dbb3507744a8f30456`
+- Size: 23,290,208 bytes
+- Source commit: `99bfc09069330b62fdad00f5ad1f68ae30eb7db1`
+- Build: `.\gradlew.bat assembleRelease test` from `android/`, with `JAVA_HOME` on JDK 17 and the existing signing properties loaded
+- The earlier local file hash `72d7c78915c89668a2041e0412493a674d2b22086e04670e4cb5b4f395c6c1ca` belonged to an APK that is no longer on disk. This rebuild is signed by the same certificate.
 - Package: `app.supertab.shop`, versionName 1.0.0, versionCode 1
 - minSdk 28, targetSdk 37, compileSdk 37
 - Permission requested by the app: `android.permission.INTERNET`
 - Signer certificate SHA-256: `0512b66bf8f8efc5119ce9c10191ed7a85317619986fbeda357c8cc39b42a439`
 - Keystore: outside Git, at `%USERPROFILE%\.config\supertab\`
+- The APK file is local. It is not in the GitHub repository.
+
+## Requirement checklist — 9 October 2026
+
+| Requirement | Artifact | Judge can open it now |
+| --- | --- | --- |
+| Functional Android APK | `submission/supertab-clockin.apk`, SHA-256 `c0fe8e1fece73cb650e1cdd65ffe7f86a220c883923f20dbb3507744a8f30456` | No. Local only. Not installed on a device in this rebuild. |
+| Source repository | https://github.com/Kleangkao/supertab at `99bfc09069330b62fdad00f5ad1f68ae30eb7db1` | No. The repository is private. |
+| Demo video | Not recorded from this APK. Existing renders are not the installed app. | No. |
+| Pitch | `submission/pitch.html` and `submission/pitch.pdf` | No, until uploaded. |
+| Metadata and install notes | This file | No, until pasted into the form. |
+| Deadline | Align `submissionCloseDate` `2026-10-12T23:59:00.000Z` = 13 October 2026, 06:59 Asia/Bangkok | The public desk HTML does not show this. The authenticated form was not opened. |
+
+Merchant-link wording is in commit `a4b6936` and is not deployed. The APK loads https://supertab-main.vercel.app/, so it still shows the older labels.
