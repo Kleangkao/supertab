@@ -52,7 +52,7 @@ Build command, from `android/`, after loading the signing values from `%USERPROF
 
 ## Notes for judges (under 500 characters)
 
-On 8 October 2026 a physical Seeker searched, refined, and reviewed a real $39.99 polo with shipping and tax unconfirmed. Mobile Wallet Adapter opened the Solana Mobile wallet, which then could not load the wallet, so a connected balance read is unverified. The 9 October rebuild is signed with the same certificate and has not been installed on a device. The APK loads the hosted site, which still uses the older merchant-link labels until that fix is deployed. No funds were sent.
+On 8 October 2026 a physical Seeker searched, refined, and reviewed a real $39.99 polo. The Solana Mobile wallet opened and then could not load, so a connected balance is unverified. On 9 October an emulator installed this APK and ran a live polo search. Product-page and merchant-cart labels were separate. No wallet was connected and no funds were sent.
 
 ## Team / contact
 
@@ -98,4 +98,4 @@ Project logo: the app icon is the SuperTab tab mark in `android/app/src/main/res
 | Metadata and install notes | This file | No, until pasted into the form. |
 | Deadline | Align `submissionCloseDate` `2026-10-12T23:59:00.000Z` = 13 October 2026, 06:59 Asia/Bangkok | The public desk HTML does not show this. The authenticated form was not opened. |
 
-Merchant-link wording is in commit `a4b6936` and is not deployed. The APK loads https://supertab-main.vercel.app/, so it still shows the older labels.
+Merchant-link wording is in commit `a4b6936`. Pushing `main` publishes production through the existing Vercel Git integration. That wording went live on `dpl_ABMeua9scWfnhyExygtmUYJQyCYZ` and stays on later production revisions from this branch. The APK loads the production alias.
