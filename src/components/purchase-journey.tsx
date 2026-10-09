@@ -16,7 +16,8 @@ export function PurchaseJourneyMap({
   return <section className="purchase-journey" aria-label="Purchase journey">
     <p className="eyebrow">ORIGINAL GOAL</p>
     <h3>AI shopping that uses Solana assets to complete purchases.</h3>
-    <p>This review keeps every stage of that journey visible. Live reads, labeled simulation, historical devnet evidence, and provider blockers stay separate.</p>
+    <p className="journey-limit" role="note">Prototype limit: retail payment and merchant order completion are currently unavailable. Search, funding review, and a labeled local rehearsal still work.</p>
+    <p>Badges describe capability or a current read—not that this shopper finished that purchase stage. Live quotes are not completed conversions. Historical devnet evidence is not payment for the selected retailer.</p>
     <ol className="journey-stages">
       {stages.map((stage) => <li key={stage.id} data-evidence={stage.evidence}>
         <div className="journey-stage-head">

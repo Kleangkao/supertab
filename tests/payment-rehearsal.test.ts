@@ -50,6 +50,18 @@ describe("isolated local payment rehearsal", () => {
     expect(() => advanceRehearsal(pending, "mark_pending")).toThrow();
   });
 
+  it("allows only late fixture evidence from pending, without creating an order", () => {
+    const pending = advanceRehearsal(advanceRehearsal(startRehearsal(4800n, "terms-d"), "approve"), "mark_pending");
+    const authorized = advanceRehearsal(pending, "resolve_pending_authorized");
+    expect(authorized.payment).toBe("PAYMENT_AUTHORIZED");
+    expect(authorized.order).toBe("ORDER_NOT_CREATED");
+    expect(() => advanceRehearsal(authorized, "confirm_order")).toThrow();
+    const declined = advanceRehearsal(pending, "resolve_pending_declined");
+    expect(declined.payment).toBe("PAYMENT_FAILED");
+    expect(declined.order).toBe("ORDER_NOT_CREATED");
+    expect(() => advanceRehearsal(declined, "capture")).toThrow();
+  });
+
   it("invalidates simulated consent when product terms change", () => {
     const state = advanceRehearsal(startRehearsal(4800n, "terms-old"), "approve");
     expect(rehearsalMatchesTerms(state, "terms-old", 4800n)).toBe(true);

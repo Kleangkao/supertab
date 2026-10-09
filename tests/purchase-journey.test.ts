@@ -36,6 +36,11 @@ function purchase(overrides: Partial<PurchaseView> = {}): PurchaseView {
 }
 
 describe("purchase journey stages", () => {
+  it("labels sample balances as simulated rather than a live wallet read", () => {
+    const stages = purchaseJourneyStages({ hasSelectedOffer: true, purchase: purchase({ walletKind: "sample", balanceSource: "sample" }) });
+    expect(stages.find(stage => stage.id === "funding")?.evidence).toBe("simulated");
+    expect(stages.find(stage => stage.id === "funding")?.detail).toContain("No real wallet");
+  });
   it("keeps live discovery separate from blocked payment and order stages", () => {
     const stages = purchaseJourneyStages({ hasSelectedOffer: true, purchase: purchase() });
     expect(stages.find((stage) => stage.id === "compare")?.evidence).toBe("live");
@@ -59,13 +64,14 @@ describe("purchase journey stages", () => {
           existingUsdc: "0.00 USDC", usdcUsed: "0.00 USDC", deficit: "35.00 USDC", reserve: "0.01 SOL",
           candidateSymbol: "SOL", candidateMint: "So11111111111111111111111111111111111111112",
           requiredInput: "0.2 SOL", expectedOutput: "35.10 USDC", minimumOutput: "34.90 USDC",
-          priceImpact: "0.1%", slippageBps: 50, platformFee: null, quoteFreshness: "fresh",
+          priceImpact: "0.1%", slippageBps: 50, platformFee: null, quoteFreshness: "live",
           quoteExpiresAt: "2099-01-01T00:00:00.000Z", fundable: true, readiness: "needs_conversion", notes: [],
         },
       }),
     });
     expect(stages.find((stage) => stage.id === "terms")?.evidence).toBe("implemented");
     expect(stages.find((stage) => stage.id === "funding")?.evidence).toBe("live");
+    expect(stages.find((stage) => stage.id === "funding")?.detail).toContain("live DFlow quote");
     expect(stages.find((stage) => stage.id === "pay")?.evidence).toBe("simulated");
     expect(stages.find((stage) => stage.id === "order")?.evidence).toBe("simulated");
   });

@@ -139,7 +139,7 @@ export function ShortlistPanel({ currentIds, onReview, onRefind }: {
   const lowest = itemPriceNote(items).startsWith("Lowest") ? prices.reduce((min, value, index) => value < prices[min]! ? index : min, 0) : -1;
   return <section id="shortlist" className="shortlist" aria-label="Shortlist" tabIndex={-1}>
     <div className="results-heading"><h2>Shortlist</h2><span>{items.length} of 4 · saved in this browser</span><button className="secondary" type="button" onClick={() => { const storage = browserStorage(); if (!storage) return; if (clearShortlist(storage).length > 0) return; window.dispatchEvent(new Event("supertab-shortlist")); }}>Clear shortlist</button></div>
-    <p className="section-copy">Saved snapshots stay here across searches and refreshes. They do not restore a funding plan or an approval.</p>
+    <p className="section-copy">Dated browser snapshots stay here across searches and refreshes. They are not live merchant totals and do not restore a funding plan or an approval.</p>
     <div className="product-grid">{items.map((item, index) => {
       const current = currentIds.has(item.id);
       return <article key={item.id} className="product-card shortlist-card">

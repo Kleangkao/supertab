@@ -55,7 +55,11 @@ export function PaymentRehearsal({
         <button onClick={() => act("decline")}>Simulate decline</button>
         <button onClick={() => act("mark_pending")}>Simulate lost response</button>
       </>}
-      {state.payment === "PAYMENT_PENDING" && <p>Payment outcome is unknown. Do not start another payment. Wait for evidence or reset the rehearsal.</p>}
+      {state.payment === "PAYMENT_PENDING" && <>
+        <p>Payment outcome is unknown. Do not start another payment. Late fixture evidence can arrive, or reset the rehearsal.</p>
+        <button onClick={() => act("resolve_pending_authorized")}>Simulate late authorization evidence</button>
+        <button onClick={() => act("resolve_pending_declined")}>Simulate late decline evidence</button>
+      </>}
       {state.payment === "PAYMENT_AUTHORIZED" && <button onClick={() => act("capture")}>Simulate capture</button>}
       {state.payment === "PAYMENT_CAPTURED" && <>
         {state.order === "ORDER_NOT_CREATED" && <button onClick={() => act("confirm_order")}>Add simulated merchant receipt</button>}

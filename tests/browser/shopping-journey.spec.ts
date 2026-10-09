@@ -93,7 +93,7 @@ test("compare differing variants and unknown costs honestly", async ({ page }) =
   await expect(shortlist.getByText("These item prices use different currencies. SuperTab does not convert them.")).toBeVisible();
   await expect(shortlist.getByText("Lowest item price, not delivered cost")).toHaveCount(0);
   await expect(shortlist.getByText(/Snapshot from 2026-10-08/).first()).toBeVisible();
-  await expect(shortlist.getByText("They do not restore a funding plan or an approval.")).toBeVisible();
+  await expect(shortlist.getByText("Dated browser snapshots stay here across searches and refreshes. They are not live merchant totals and do not restore a funding plan or an approval.")).toBeVisible();
 });
 
 test("a new search keeps the shortlist", async ({ page }) => {
@@ -176,6 +176,7 @@ test("purchase review keeps the full journey and a labeled simulation separate f
   await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Review purchase" }).click();
   const journey = page.getByRole("region", { name: "Purchase journey" });
   await expect(journey).toContainText("AI shopping that uses Solana assets to complete purchases.");
+  await expect(journey).toContainText("Prototype limit: retail payment and merchant order completion are currently unavailable.");
   await expect(journey).toContainText("Pay the merchant");
   await expect(journey.getByText("Provider-blocked").first()).toBeVisible();
   const rehearsal = page.getByRole("region", { name: "Local payment rehearsal" });
@@ -187,7 +188,10 @@ test("purchase review keeps the full journey and a labeled simulation separate f
   await rehearsal.getByRole("button", { name: "Simulate lost response" }).click();
   await expect(rehearsal).toContainText("Simulated PAYMENT PENDING");
   await expect(rehearsal).toContainText("Payment outcome is unknown");
+  await rehearsal.getByRole("button", { name: "Simulate late authorization evidence" }).click();
+  await expect(rehearsal).toContainText("Simulated PAYMENT AUTHORIZED");
   await expect(rehearsal).toContainText("Live PAYMENT NOT READY");
+  await expect(rehearsal).toContainText("Live ORDER NOT CREATED");
 });
 
 test("a narrow viewport can search from the keyboard without horizontal overflow", async ({ page }) => {

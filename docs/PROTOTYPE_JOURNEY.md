@@ -21,10 +21,14 @@ Shopping search and merchant handoff are portions of that journey, not a replace
 ## UI connections (this pass)
 
 - Purchase review opens with a journey map derived from the live `PurchaseView`.
+- The goal headline stays “AI shopping that uses Solana assets to complete purchases,” with a nearby prototype-limit note that retail payment and merchant order completion are unavailable.
+- Badges mean capability or current read status, not that the shopper finished that stage. Sample balances are `simulated`. Funding quotes use `quoteFreshness === "live"`.
 - Live payment/order statuses remain on the card-rail panel.
 - Local rehearsal shows simulated and live statuses side by side, binds to `termsId`, and resets when product/quantity/terms change.
+- A lost-response pending state can receive late fixture authorization or decline evidence without starting a second payment or creating an order.
 - Historical quote/devnet evidence is collapsed away from the primary shopping composer.
 - Intro copy names discover → fund → approve → complete without claiming retail payment works.
+- Shortlist items are dated browser snapshots, not live merchant totals.
 
 ## What this is not
 

@@ -19,8 +19,8 @@ export interface JourneyStage {
 
 export function journeyEvidenceLabel(evidence: JourneyEvidence): string {
   switch (evidence) {
-    case "live": return "Live";
-    case "implemented": return "Implemented";
+    case "live": return "Live capability";
+    case "implemented": return "In code";
     case "simulated": return "Simulated";
     case "blocked": return "Provider-blocked";
     case "planned": return "Planned";
@@ -40,8 +40,8 @@ export function purchaseJourneyStages(input: {
   const purchase = input.purchase;
   const verified = purchase?.finalTotal === "verified";
   const approved = purchase?.purchaseApproval === "approved";
-  const walletLoaded = !!purchase && purchase.walletKind !== "none" && purchase.balanceSource !== "none" && purchase.balanceSource !== "error";
-  const quoteLive = purchase?.funding?.quoteFreshness === "fresh";
+  const walletLoaded = !!purchase && purchase.walletKind !== "none" && purchase.balanceSource === "chain";
+  const quoteLive = purchase?.funding?.quoteFreshness === "live";
   const conversionPrepared = purchase?.unsignedTransaction === "prepared";
   const railBlocked = !purchase || purchase.cardRail.availability !== "ready";
   const rehearsal = !!input.rehearsalActive;
@@ -66,8 +66,8 @@ export function purchaseJourneyStages(input: {
     {
       id: "funding",
       title: "Check Solana wallet funding",
-      evidence: walletLoaded ? "live" : "implemented",
-      detail: walletLoaded
+      evidence: purchase?.balanceSource === "sample" ? "simulated" : walletLoaded ? "live" : "implemented",
+      detail: purchase?.balanceSource === "sample" ? "Illustrative sample balances only. No real wallet was read." : walletLoaded
         ? (quoteLive
           ? "Balances and a live DFlow quote are on screen. No conversion is signed."
           : "Balances are loaded. Refresh the funding quote if conversion is needed.")
@@ -99,8 +99,10 @@ export function purchaseJourneyStages(input: {
       title: "Convert assets when needed",
       evidence: conversionPrepared ? "implemented" : quoteLive ? "live" : "implemented",
       detail: conversionPrepared
-        ? "An unsigned conversion is prepared and format-checked. Production signing stays disabled."
-        : "DFlow can quote the funding gap. Execution of a swap is refused while the financial gate is off.",
+        ? "An unsigned conversion is prepared and format-checked. It is not an executed swap. Production signing stays disabled."
+        : quoteLive
+          ? "A live DFlow quote is available for the funding gap. A quote is not a completed conversion."
+          : "DFlow can quote the funding gap. Execution of a swap is refused while the financial gate is off.",
       nextAction: null,
     },
     {
@@ -117,7 +119,7 @@ export function purchaseJourneyStages(input: {
       title: "Receive verified order evidence",
       evidence: rehearsal ? "simulated" : "blocked",
       detail: rehearsal
-        ? "Simulated capture still leaves the order uncreated until separate fixture evidence is added."
+        ? "Simulated capture still leaves the order uncreated until separate fixture evidence is added. Capture is not an order."
         : "Retail order evidence needs agent complete_checkout permission, which this build does not call.",
       nextAction: "Shopify order-complete access, or keep using merchant handoff.",
     },
@@ -125,7 +127,7 @@ export function purchaseJourneyStages(input: {
       id: "recover",
       title: "Track or recover the outcome",
       evidence: "implemented",
-      detail: "Pending payment and missing order stay distinct. Unresolved attempts refuse a second start. Devnet refund history is a separate product.",
+      detail: "Pending payment and missing order stay distinct. Unresolved attempts refuse a second start. Owner-controlled devnet refund history is a separate product, not payment for this retailer.",
       nextAction: null,
     },
   ];

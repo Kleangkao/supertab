@@ -18,6 +18,8 @@ export type RehearsalAction =
   | "authorize"
   | "decline"
   | "mark_pending"
+  | "resolve_pending_authorized"
+  | "resolve_pending_declined"
   | "capture"
   | "confirm_order"
   | "refund"
@@ -53,6 +55,12 @@ export function advanceRehearsal(state: PaymentRehearsal, action: RehearsalActio
       requireState(state.payment === "PAYMENT_READY" && state.ledger != null);
       next.ledger = noteUnresolvedAttempt(state.ledger!);
       next.payment = next.ledger.payment;
+      break;
+    case "resolve_pending_authorized":
+    case "resolve_pending_declined":
+      // Late fixture evidence only. Pending is not decline or success, and it is not a second payment start.
+      requireState(state.payment === "PAYMENT_PENDING" && state.ledger != null && state.order === "ORDER_NOT_CREATED");
+      applyEvidence(action === "resolve_pending_authorized" ? "authorized" : "declined");
       break;
     case "capture":
       requireState(state.payment === "PAYMENT_AUTHORIZED");
