@@ -14,7 +14,8 @@
     "test:browser": "playwright test",
     "test:worker-sessions": "node scripts/verify-worker-sessions.mjs",
     "typecheck": "next typegen && tsc --noEmit",
-    "merchant": "node --env-file=.env.local scripts/devnet-merchant.mjs"
+    "merchant": "node --env-file=.env.local scripts/devnet-merchant.mjs",
+    "bundle:mwa": "node scripts/bundle-mwa.mjs"
   },
   "dependencies": {
     "next": "16.3.8",
@@ -23,10 +24,12 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
+    "@solana-mobile/wallet-standard-mobile": "^0.6.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24.19.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
     "tailwindcss": "^4",

@@ -81,3 +81,42 @@ it("keeps SuperTab's application id and hosted origin out of the Sudoku shell", 
   expect(signing).toContain("SUPERTAB_KEYSTORE_PATH");
   expect(signing).not.toContain("SOLANA_MOBILE_KEYSTORE");
 });
+
+it("the packaged Android bundle actually registers a connection-capable wallet", () => {
+  const listeners = new Map<string, (event: { detail: unknown }) => void>();
+  const wallets: { name: string; features: Record<string, unknown> }[] = [];
+  const api = { register: (...items: typeof wallets) => { wallets.push(...items); } };
+  class CustomEvent {
+    constructor(public type: string, public init: { detail: unknown }) {}
+    get detail() { return this.init.detail; }
+  }
+  const browser = {
+    isSecureContext: true,
+    location: { origin: "https://supertab-main.vercel.app" },
+    localStorage: memory(),
+    addEventListener: (type: string, listener: (event: { detail: unknown }) => void) => listeners.set(type, listener),
+    dispatchEvent: (event: CustomEvent) => {
+      if (event.type === "wallet-standard:register-wallet") (event.detail as (api: unknown) => void)(api);
+      return true;
+    },
+  };
+  const context = {
+    window: browser, document: {}, CustomEvent, Event, URL,
+    navigator: { userAgent: "Mozilla/5.0 Android Solana Mobile Web Shell" },
+    TextEncoder, TextDecoder, console,
+  };
+  const bundle = readFileSync("android/app/src/main/assets/mwa-bootstrap.js", "utf8");
+  runInNewContext(bundle, context);
+  expect(wallets).toHaveLength(1);
+  expect(wallets[0].name).toBe("Mobile Wallet Adapter");
+  expect(wallets[0].features["standard:connect"]).toBeDefined();
+  runInNewContext(bundle, context);
+  expect(wallets).toHaveLength(1);
+  const desktop = { ...browser, __supertabMwaRegistered: false };
+  runInNewContext(bundle, { ...context, window: desktop, navigator: { userAgent: "Mozilla/5.0" } });
+  expect(desktop.__supertabMwaRegistered).toBe(false);
+  const insecure = { ...browser, __supertabMwaRegistered: false, isSecureContext: false };
+  runInNewContext(bundle, { ...context, window: insecure });
+  expect(insecure.__supertabMwaRegistered).toBe(false);
+  expect(wallets).toHaveLength(1);
+});

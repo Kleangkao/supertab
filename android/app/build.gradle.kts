@@ -24,6 +24,20 @@ val hasReleaseSigning =
         webShellSigningStorePassword != null &&
         webShellSigningKeyAlias != null
 
+// Recovery previously left a placeholder asset that built successfully but
+// could never discover an Android wallet. Refuse to package that artifact.
+val verifyWalletBundle = tasks.register("verifyWalletBundle") {
+    val bundle = layout.projectDirectory.file("src/main/assets/mwa-bootstrap.js")
+    inputs.file(bundle)
+    doLast {
+        val script = bundle.asFile.readText()
+        if (script.contains("__supertabMwaBootstrapMissing") || !script.contains("registerMwa")) {
+            throw GradleException("Android wallet bundle is missing. Run npm run bundle:mwa from the repository root.")
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyWalletBundle) }
+
 if (webShellApplicationId != "app.supertab.shop" && configValue("SUPERTAB_ALLOW_APPLICATION_ID") != "1") {
     throw GradleException("SuperTab release identity must stay app.supertab.shop unless SUPERTAB_ALLOW_APPLICATION_ID=1.")
 }

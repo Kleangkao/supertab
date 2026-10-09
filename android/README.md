@@ -36,6 +36,7 @@ A debug build can point at a local server with `-PSUPERTAB_MOBILE_URL=http://10.
 Regenerate the wallet bundle from the repository root after changing `src/lib/mwa-bootstrap.ts`:
 
 ```powershell
-npm install
-npx esbuild src/lib/mwa-bootstrap.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=android/app/src/main/assets/mwa-bootstrap.js
+npm ci
+npm run bundle:mwa
+npx vitest run tests/android-shell.test.ts
 ```

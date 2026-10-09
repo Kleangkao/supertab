@@ -7,8 +7,8 @@ declare global {
 }
 
 /**
- * Android MWA registration is out of this release-hardening scope.
- * Keep a stable API for the shop UI without requiring the mobile package at build time.
+ * The Android document-start asset registers MWA. Discovery listens for its
+ * registration event even when the asset finishes after React mounts.
  */
 export function ensureAndroidWallet(): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(false);
