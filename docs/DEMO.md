@@ -23,9 +23,33 @@ Open http://localhost:3000.
 
 The devnet USDC amount is the test price. Devnet SOL is only the network fee. Devnet checkout does not use the conversion quote.
 
+## Proposed stable demo flow (prototype-journey)
+
+Final demo recording stays paused until the owner freezes this flow. Use hosted `d42c4f9` (or later) after an authorized main push — not the older `aead101` production tip.
+
+1. Open shopping. Describe a product; refine once. Say listings are real provider results, not a payable merchant total.
+2. Shortlist and compare. Name shortlist cards as dated browser snapshots.
+3. Select one offer. Open funding review. Label sample balances as simulated; treat a live quote as a current read, not a completed conversion. Do not sign or send.
+4. Open the **Purchase journey** map. Keep the goal: AI shopping that uses Solana assets to complete purchases. Read the nearby limit: retail payment and merchant order completion are unavailable. Badges are capability/read status, not finished stages.
+5. Open **Try the payment journey**. Announce local simulation. Point out invented $5 shipping / $3 tax. Approve, optionally leave a lost-response pending, then resolve with late fixture evidence or authorize and capture. Live statuses stay not executed / not created.
+6. Open a merchant handoff link. Say product page vs cart permalink vs unknown destination. A cart link may add an item; it does not pay or place an order.
+7. Stop. Do not request signatures, swaps, retail payment, or refunds.
+
+### Demo-flow stability checklist
+
+- [ ] Journey map and claims match the deployed commit
+- [ ] Sample balances labeled simulated; quotes not described as completed conversions
+- [ ] Rehearsal stays `local_simulation` and cannot change live authority
+- [ ] Browser shopping → shortlist → compare → funding → journey → rehearsal → handoff verified on that build
+- [ ] Android/WebView loads the intended hosted URL; back/merchant return checked
+- [ ] No unresolved critical usability or safety issues
+- [ ] Provider blockers listed once; frozen external work not pursued mid-demo
+- [ ] Source commit, Vercel deployment id, and APK version/hash recorded
+- [ ] Owner agrees the flow is frozen before any final recording
+
 ## Two-minute presenter flow
 
-Historical shopping and simulated-card rehearsal below. Use the prototype script above for the current presentation. The matrix below predates the verified Phantom devnet purchase/refund and must not be used as the current capability summary. CardRail remains unconnected and is not required by the current prototype.
+Historical shopping and simulated-card rehearsal below. Prefer **Proposed stable demo flow** above for the current presentation. The matrix below predates the verified Phantom devnet purchase/refund and must not be used as the current capability summary. CardRail remains unconnected and is not required by the current prototype.
 
 1. Ask for a black polo under $50. Explain that these are real provider listings, with actual merchant names and prices. Follow up with a preference to show conversation constraints persist.
 2. Select a product. Show its variant and merchant-review link. Say: "This is the listed amount. Final shipping and tax still need the merchant's checkout; SuperTab will not call this a verified payable total."
