@@ -1,10 +1,11 @@
 import type { OrderState, PaymentState } from "./payment-lifecycle";
-import { applyPaymentEvent, createPaymentLedger, type PaymentLedger, type PaymentLedgerEvent } from "./payment-ledger";
+import { applyPaymentEvent, createPaymentLedger, noteUnresolvedAttempt, type PaymentLedger, type PaymentLedgerEvent } from "./payment-ledger";
 
 /** Local fixtures only. This module has no provider, wallet or network access. */
 export interface PaymentRehearsal {
   mode: "local_simulation";
   totalMinor: bigint;
+  termsKey: string;
   payment: PaymentState;
   order: OrderState;
   orderReference: string | null;
@@ -12,12 +13,27 @@ export interface PaymentRehearsal {
   ledger: PaymentLedger | null;
 }
 
-export type RehearsalAction = "approve" | "authorize" | "decline" | "capture" | "confirm_order" | "refund" | "replay_capture" | "late_authorization";
+export type RehearsalAction =
+  | "approve"
+  | "authorize"
+  | "decline"
+  | "mark_pending"
+  | "capture"
+  | "confirm_order"
+  | "refund"
+  | "replay_capture"
+  | "late_authorization";
 
-export function startRehearsal(totalMinor: bigint): PaymentRehearsal {
+export function startRehearsal(totalMinor: bigint, termsKey = "rehearsal-fixture"): PaymentRehearsal {
   if (totalMinor <= 0n) throw new Error("A rehearsal needs a positive fixture total.");
-  return { mode: "local_simulation", totalMinor, payment: "PAYMENT_APPROVAL_REQUIRED",
+  if (!termsKey.trim()) throw new Error("A rehearsal needs a terms key bound to the selected product.");
+  return { mode: "local_simulation", totalMinor, termsKey, payment: "PAYMENT_APPROVAL_REQUIRED",
     order: "ORDER_NOT_CREATED", orderReference: null, events: [], ledger: null };
+}
+
+/** Changing product, quantity, or live terms invalidates simulated consent. */
+export function rehearsalMatchesTerms(state: PaymentRehearsal, termsKey: string, totalMinor: bigint): boolean {
+  return state.termsKey === termsKey && state.totalMinor === totalMinor;
 }
 
 export function advanceRehearsal(state: PaymentRehearsal, action: RehearsalAction): PaymentRehearsal {
@@ -26,12 +42,17 @@ export function advanceRehearsal(state: PaymentRehearsal, action: RehearsalActio
     case "approve":
       requireState(state.payment === "PAYMENT_APPROVAL_REQUIRED");
       next.payment = "PAYMENT_READY";
-      next.ledger = createPaymentLedger("rehearsal-fixture", state.totalMinor, "local_simulation");
+      next.ledger = createPaymentLedger(state.termsKey, state.totalMinor, "local_simulation");
       break;
     case "authorize":
     case "decline":
       requireState(state.payment === "PAYMENT_READY");
       applyEvidence(action === "authorize" ? "authorized" : "declined");
+      break;
+    case "mark_pending":
+      requireState(state.payment === "PAYMENT_READY" && state.ledger != null);
+      next.ledger = noteUnresolvedAttempt(state.ledger!);
+      next.payment = next.ledger.payment;
       break;
     case "capture":
       requireState(state.payment === "PAYMENT_AUTHORIZED");
@@ -59,7 +80,7 @@ export function advanceRehearsal(state: PaymentRehearsal, action: RehearsalActio
   function applyEvidence(kind: PaymentLedgerEvent["kind"]) {
     requireState(state.ledger != null);
     next.ledger = applyPaymentEvent(state.ledger!, {
-      eventId: `fixture-${kind}`, kind, purchaseId: "rehearsal-fixture",
+      eventId: `fixture-${kind}`, kind, purchaseId: state.termsKey,
       amountMinor: state.totalMinor, currency: "USD", mode: "local_simulation",
     });
     next.payment = next.ledger.payment;

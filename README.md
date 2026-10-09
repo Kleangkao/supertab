@@ -1,12 +1,14 @@
 # SuperTab
 
-Prototype. A shopper can review one recorded Solana Spaces quote and, separately, a completed owner-controlled devnet purchase and refund. The devnet payment did not buy the shirt, and no real-retailer purchase has been completed.
+SuperTab is AI shopping that uses Solana assets to complete purchases.
 
-The public site is https://supertab-main.vercel.app. Its devnet merchant is https://supertab-devnet-merchant.jamesbitarcade.workers.dev. Retail checkout stays quote-only. The devnet page is a separate test product. Card payments are planned. The timestamp merchant integration has no verified settlement or certificate.
+The intended journey is: describe a product → find and compare real offers → check Solana wallet funding → review final purchase terms → obtain explicit approval → convert assets when needed → pay the merchant → receive verified order evidence → track or recover the outcome.
 
-From this directory, start the local merchant with `npm run merchant`, then `npm run dev`, and open http://localhost:3000. The local merchant listens on `127.0.0.1:8787` and keeps its ledger in `data/devnet-merchant.json`. The hosted merchant does not use that file. It stores the same ledger in a Cloudflare Durable Object, so a redeploy keeps the orders. Current evidence is in [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md). The rehearsal is in [docs/DEMO_REHEARSAL.md](docs/DEMO_REHEARSAL.md).
+This repository is an honest prototype of that journey. Live shopping, funding reads, and merchant handoff work today. Retail payment and merchant order creation are blocked by provider access. A labeled local simulation can rehearse payment and order stages without provider calls. A separate owner-controlled devnet product was paid and refunded; that payment did not buy a selected retailer item. No continuous independently verified retail purchase has been completed.
 
-SuperTab is AI shopping powered by Solana assets. A shopper describes a product. SuperTab searches real merchants, compares the offers it actually received, and works out whether USDC already in the shopper's Solana wallet covers the known price. If it does not, DFlow can quote a conversion from a supported Solana asset into USDC. A replaceable card rail is meant to pay an ordinary merchant later. That rail is not connected, and this build does not move funds.
+The public site is https://supertab-main.vercel.app. Its devnet merchant is https://supertab-devnet-merchant.jamesbitarcade.workers.dev. Stage classifications are in [docs/PROTOTYPE_JOURNEY.md](docs/PROTOTYPE_JOURNEY.md). Frozen provider blockers are in [docs/BLOCKER_REGISTER.md](docs/BLOCKER_REGISTER.md). Current hosted notes are in [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+
+From this directory, start the local merchant with `npm run merchant`, then `npm run dev`, and open http://localhost:3000. The local merchant listens on `127.0.0.1:8787` and keeps its ledger in `data/devnet-merchant.json`. The hosted merchant stores the same ledger in a Cloudflare Durable Object.
 
 ## What works now
 
@@ -22,7 +24,8 @@ SuperTab is AI shopping powered by Solana assets. A shopper describes a product.
 - A purchase review that keeps payment and merchant order separate.
 - Authenticated Shopify checkout pricing for explicitly configured merchant origins. A buyer-entered destination can be sent with `create_checkout`. A reconciled total that includes shipping and tax becomes a merchant-calculated funding amount and can still change. Only a current `ready_for_complete` response, with no blocking message and no provisional discount, can be approved. Evidence expires after at most five minutes. SuperTab never calls `complete_checkout`.
 - An honest "provider not connected" card rail.
-- A local payment rehearsal for the selected product with explicit approval, authorization, decline, capture, independent simulated order evidence, and refund. It uses the listed item amount plus clearly invented $5 shipping and $3 tax fixtures, makes no provider calls, and never uses wallet funds.
+- A purchase-journey map in the review panel that labels each original-goal stage as live, implemented, simulated, blocked, planned, or historical.
+- A local payment rehearsal for the selected product with explicit approval, authorization, decline, lost-response pending, capture, independent simulated order evidence, and refund. It uses the listed item amount plus clearly invented $5 shipping and $3 tax fixtures, makes no provider calls, never uses wallet funds, and cannot change live payment or order status.
 
 Catalog and listing prices are not merchant checkout totals. Shipping and tax stay unknown unless a provider returns them.
 

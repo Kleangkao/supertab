@@ -75,17 +75,13 @@ export function PrototypePaths({ compact = false }: { compact?: boolean }) {
     </article>
   </div>;
 
-  if (compact) {
-    return <details className="prototype-paths">
-      <summary>Prototype paths · real quote or devnet test</summary>
+  return <details className="prototype-paths" open={!compact ? undefined : false}>
+    <summary>{compact ? "Historical evidence · recorded quote or devnet order" : "Historical evidence · not the live shopping path"}</summary>
+    <section aria-label="Historical evidence">
+      <p className="eyebrow">EVIDENCE</p>
+      <h2>Two separate records.</h2>
+      <p>These are not a completed retail purchase of the product you just searched. Neither path spends mainnet funds.</p>
       {body}
-    </details>;
-  }
-
-  return <section className="prototype-paths" aria-label="Prototype paths">
-    <p className="eyebrow">PROTOTYPE</p>
-    <h2>Two ways to look at the evidence.</h2>
-    <p>Choose a recorded retail quote, or the separate devnet purchase. Neither path spends mainnet funds.</p>
-    {body}
-  </section>;
+    </section>
+  </details>;
 }

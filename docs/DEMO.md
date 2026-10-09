@@ -31,9 +31,10 @@ Historical shopping and simulated-card rehearsal below. Use the prototype script
 2. Select a product. Show its variant and merchant-review link. Say: "This is the listed amount. Final shipping and tax still need the merchant's checkout; SuperTab will not call this a verified payable total."
 3. Choose the explicit real demo wallet in read-only mode, or enter an authorized public Solana address. Show USDC already present, the funding gap, the selected funding asset and the SOL reserve.
 4. If a DFlow quote arrives, explain minimum received, expiry and whether it covers the gap. If funds are insufficient, show that result and choose a cheaper product. Do not claim a swap is complete when an unsigned transaction is merely prepared.
-5. Open **Try the payment journey**. The selected product's listed amount is reused, but $5 shipping and $3 tax are invented local fixtures. Explicitly announce the switch to simulation. Approve the displayed simulated total, authorize, then capture.
-6. Point out that simulated capture leaves the merchant order uncreated. Add the simulated receipt separately. Optionally show refund and delayed/duplicate event replay. No card, payment or order has been created externally.
-7. End with the bridge: "Solana supplies the assets, DFlow supplies conversion quotes, and a provider-neutral CardRail is designed to connect purchasing power to normal merchants. Verified checkout totals and actual sandbox CardRail access are the next integration milestones."
+5. In the purchase review, read the **Purchase journey** map. Name which stages are live, implemented, simulated, or provider-blocked. Keep the original goal explicit.
+6. Open **Try the payment journey**. The selected product's listed amount is reused, but $5 shipping and $3 tax are invented local fixtures. Explicitly announce the switch to simulation. Approve the displayed simulated total, optionally show a lost response as pending, then authorize and capture.
+7. Point out that simulated capture leaves the merchant order uncreated, while live statuses stay not executed / not created. Add the simulated receipt separately. Optionally show refund and delayed/duplicate event replay. No card, payment or order has been created externally.
+8. End with the bridge: "The product is AI shopping that uses Solana assets to complete purchases. Live shopping and funding exist today. Card-rail sandbox access and Shopify order-complete permission are the resume conditions for live payment and order evidence."
 
 ## Capability matrix
 

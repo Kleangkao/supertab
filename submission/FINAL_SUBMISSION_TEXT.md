@@ -4,15 +4,15 @@ Do not submit this form automatically. The authenticated CLOCK IN form was not o
 
 ## Brief description (under 500 characters)
 
-SuperTab is an Android shopping app for people who hold Solana. It searches Shopify and eBay, lets you refine the request, and reviews a real listing price while shipping and tax stay unconfirmed. Mobile Wallet Adapter is available for a read-only balance check. Retail checkout is quote-only. An earlier owner-controlled devnet order was paid and refunded. A card rail is planned.
+SuperTab is AI shopping that uses Solana assets to complete purchases. The Android app searches real products, reviews funding from a Solana wallet, and keeps approval, payment, and order evidence as separate steps. Retail payment is blocked by provider access. A labeled simulation and a separate paid-and-refunded devnet test show the intended path without claiming a completed retail purchase.
 
 ## What are you building, and who is it for?
 
-I'm building SuperTab for people who have crypto in a Solana wallet and want to use it for everyday shopping. The CLOCK IN build is an installed Android app. You tell it what you want, like a black polo under $50, then refine that request. It finds real products and shows the listed price next to what a wallet would still need. Shipping and tax stay unknown until a merchant confirms them. Retail checkout is quote-only. A separate devnet checkout has a recorded payment and refund. A crypto card service is the next step toward paying ordinary stores.
+I'm building SuperTab for people who hold Solana and want to buy ordinary goods with what their wallet can cover. The full goal is search, compare, fund, approve exact terms, convert when needed, pay the merchant, and recover the order. The CLOCK IN build is an installed Android app that already does live shopping and funding review. Retail payment and merchant order creation stay blocked while card-rail and Shopify order access are missing. A labeled local rehearsal and a separate owner-controlled devnet payment/refund keep that destination visible without overstating it.
 
 ## Why did you decide to build this, and why build it now?
 
-I wanted to make crypto useful beyond holding and trading. Someone can have money in a Solana wallet and still face several steps just to buy something online. SuperTab puts search, funding review, and a clearly labeled test checkout in one Android app. Solana Mobile's wallet adapter is how a Seeker can connect without a desktop browser extension.
+I wanted to make crypto useful beyond holding and trading. Someone can have money in a Solana wallet and still face several disconnected steps to buy something online. SuperTab keeps the whole purchase journey in one Android app, with honest labels for what is live, simulated, historical, or blocked. Solana Mobile's wallet adapter is how a Seeker can connect without a desktop browser extension.
 
 ## Technologies
 
@@ -24,7 +24,7 @@ Solana
 
 ## How does your product use these chains? (under 500 characters)
 
-The Android app can request a Mobile Wallet Adapter connection and read balances without sending a transaction. DFlow can quote a conversion into USDC. Retail checkout does not pay the store. A separate owner-controlled devnet order was paid and later refunded; the app can open that recorded order. No new payment is part of the demo.
+The app reads Solana balances and can quote a DFlow conversion into USDC without broadcasting. Purchase approval is bound to exact terms. Retail payment stays provider-blocked. A labeled simulation rehearses authorize/capture/order without funds. A separate owner-controlled devnet order was paid and refunded; it is not payment for the selected retailer.
 
 ## Category
 

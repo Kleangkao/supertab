@@ -6,6 +6,7 @@ import { PaymentRehearsal } from "@/components/payment-rehearsal";
 import { AssetConversion } from "@/components/asset-conversion";
 import { DigitalPurchase } from "@/components/digital-purchase";
 import { PrototypePaths } from "@/components/prototype-paths";
+import { PurchaseJourneyMap } from "@/components/purchase-journey";
 import { CheckoutReview } from "@/components/checkout-review";
 import { connectStandardWallet, discoverStandardWallets, signDevnetCheck, signMainnetTransaction, signWalletMessage, supportsDevnetSigning, supportsWalletMessage, watchStandardWallet, type StandardWallet, type StandardWalletAccount } from "@/lib/wallet-standard";
 import type { WalletChallenge } from "@/lib/wallet-proof";
@@ -61,6 +62,7 @@ export function ShopApp() {
   const [devnetCheck, setDevnetCheck] = useState<DevnetSigningCheck | null>(null);
   const [canSignDevnet, setCanSignDevnet] = useState(false);
   const [walletSigned, setWalletSigned] = useState(false);
+  const [rehearsalActive, setRehearsalActive] = useState(false);
   const [now, setNow] = useState(0);
   const androidShell = useSyncExternalStore(subscribeNothing, androidShellSnapshot, androidShellServer);
   const offline = !useSyncExternalStore(subscribeOnline, onlineSnapshot, onlineServer);
@@ -390,20 +392,6 @@ export function ShopApp() {
           <h1>{session ? "Find your next favorite." : <>Good finds.<br /><span>Powered by your wallet.</span></>}</h1>
           {!session && <p className="hero-copy">Tell us what you’re looking for. SuperTab finds real products and helps you plan how to fund them with your Solana assets.</p>}
         </header>
-        {session ? <PrototypePaths compact /> : <PrototypePaths />}
-        <DigitalPurchase
-          key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}:${walletMode}`}
-          address={purchase?.walletKind === "sample" ? "" : address}
-          network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : walletChains.includes("solana:mainnet") ? "solana:mainnet" : ""}
-          walletSource={!address || purchase?.walletKind === "sample" || !walletChains.includes("solana:mainnet") ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
-          signTransaction={walletMode === "connected" ? async (transaction) => {
-            const wallet = activeWallet.current;
-            if (!wallet) throw new Error("Connect the wallet that reviewed these terms.");
-            return signMainnetTransaction(wallet, address, transaction, activeAccount.current ?? undefined);
-          } : undefined}
-          onUseReadOnly={() => { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; walletDesk.current = null; walletEpoch.current++; setWalletSigned(false); setWalletChallenge(null); setCanSignMessage(false); setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
-        />
-        <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />
         <form onSubmit={search} className="composer"><label className="sr-only" htmlFor="request">Shopping request</label><textarea id="request" value={draft} onChange={event => setDraft(event.target.value)} rows={2} maxLength={SHOPPING_MESSAGE_LIMIT} disabled={!!busy} placeholder={session ? "Refine your search. Try “Navy is fine too.”" : "Find me a black polo under $50."} /><div className="composer-bottom"><span>{draft.length}/{SHOPPING_MESSAGE_LIMIT}. {session ? "A message that starts with Find starts a new search. Your shortlist stays." : "Your taste. Your budget. Real stores."}</span><button className="primary" disabled={!!busy || !draft.trim()}>Find it <span aria-hidden="true">↗</span></button></div></form>
         {!session && <div className="wallet-control"><p className="section-copy">Connect to review your wallet and quotes. Connection requests no signature and approves no payment. Wallet control proof is optional and separate.</p>{walletSigned ? <p>Wallet control verified. No purchase was approved and no transaction was broadcast.</p> : <button className="secondary" disabled={!!busy} onClick={() => void connectWallet()}>Connect wallet</button>}
           {walletMode === "connected" && <><p>Connected wallet: {address}. Control proof {walletSigned ? "verified" : "not requested"}.</p>{!walletChallenge && !walletSigned && <button className="secondary" disabled={!!busy || !canSignMessage} onClick={() => void checkWalletControl()}>Review optional wallet control message</button>}</>}
@@ -414,6 +402,22 @@ export function ShopApp() {
         {busy && <div className="loading-note" role="status"><span className="spinner" />{busy}<span className="loading-hint">Live providers can take a moment.</span></div>}
         {error && <div className="notice warning" role="alert">{error}<button onClick={() => setError(null)} aria-label="Dismiss message">×</button></div>}
         {note && <p id="shopping-note" className="section-copy" role="status" tabIndex={-1}>{note}</p>}
+        <PrototypePaths compact />
+        {!session && <>
+          <DigitalPurchase
+            key={`${purchase?.walletKind === "sample" ? "" : address}:${purchase?.walletKind === "sample" ? "" : walletChains.join(",")}:${walletMode}`}
+            address={purchase?.walletKind === "sample" ? "" : address}
+            network={!address || purchase?.walletKind === "sample" ? "" : walletChains.includes("solana:devnet") && !walletChains.includes("solana:mainnet") ? "solana:devnet" : walletChains.includes("solana:mainnet") ? "solana:mainnet" : ""}
+            walletSource={!address || purchase?.walletKind === "sample" || !walletChains.includes("solana:mainnet") ? "not_selected" : walletMode === "connected" ? "connected" : "read_only"}
+            signTransaction={walletMode === "connected" ? async (transaction) => {
+              const wallet = activeWallet.current;
+              if (!wallet) throw new Error("Connect the wallet that reviewed these terms.");
+              return signMainnetTransaction(wallet, address, transaction, activeAccount.current ?? undefined);
+            } : undefined}
+            onUseReadOnly={() => { walletOff.current?.(); walletOff.current = null; activeWallet.current = null; activeAccount.current = null; walletDesk.current = null; walletEpoch.current++; setWalletSigned(false); setWalletChallenge(null); setCanSignMessage(false); setWalletMode("address"); setAddress(DEMO_ADDRESS); setWalletChains(["solana:mainnet"]); }}
+          />
+          <AssetConversion key={purchase?.walletKind === "sample" ? "sample" : address || "none"} suggestedAddress={purchase?.walletKind === "sample" ? "" : address} />
+        </>}
         {session ? <section className="results" aria-label="Shopping results" aria-busy={!!busy}>
           <div className="conversation"><span className="assistant-mark">✦</span><div><p className="eyebrow">SUPERTAB FINDS</p><p>{session.assistantMessage}</p></div></div>
           <div className="requirements"><span>Looking for</span><strong>{session.constraintsLabel}</strong><button type="button" className="secondary" disabled={!!busy} onClick={() => { setDraft("Find "); document.getElementById("request")?.focus(); }}>New search</button></div>
@@ -424,10 +428,16 @@ export function ShopApp() {
           {session.exact.length ? <div className="product-grid">{session.exact.map(offer => <OfferCard key={offer.id} offer={offer} selected={offer.id === session.selectedOfferId} disabled={!!busy} onSelect={() => void selectOffer(offer.id, walletMode, address, null)} onSave={() => { const text = saveOffer(offer); setNote(text); queueMicrotask(() => document.getElementById("shopping-note")?.focus()); }} />)}</div> : <div className="empty-state"><span>⌕</span><h3>No confirmed matches yet</h3><p>Nothing was dropped silently. Remove a requirement only if you want that restriction gone.</p>{emptyStateActions(session.constraints).map(action => <button key={action.label} className="secondary" type="button" disabled={!!busy} onClick={() => void submitShopping(action.message, false)}>{action.label}</button>)}</div>}
           {session.uncertain.length > 0 && <details className="excluded" open><summary>{session.uncertain.length} listings · requirement not confirmed</summary><div className="product-grid">{session.uncertain.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} disabled={!!busy} onSelect={() => void selectOffer(item.offer.id, walletMode, address, null)} onSave={() => { const text = saveOffer(item.offer); setNote(text); queueMicrotask(() => document.getElementById("shopping-note")?.focus()); }} />)}</div></details>}
           {session.excluded.length > 0 && <details className="excluded"><summary>{session.excluded.length} other listings · a requirement conflicts</summary><div className="product-grid">{session.excluded.map(item => <OfferCard key={item.offer.id} offer={item.offer} reasons={item.reasons} />)}</div></details>}
-        </section> : <section className="intro-steps" aria-label="How SuperTab works"><div><span>01 / DISCOVER</span><h2>Ask for what you love.</h2><p>Real finds from Shopify and eBay, shaped around your preferences.</p></div><div><span>02 / PLAN</span><h2>Put your assets in context.</h2><p>See your USDC balance and a live conversion quote for the difference.</p></div><div><span>03 / REVIEW</span><h2>You stay in control.</h2><p>Review an unsigned transaction. This demo stops before money moves.</p></div></section>}
+        </section> : <section className="intro-steps" aria-label="How SuperTab works">
+          <div><span>01 / DISCOVER</span><h2>Ask for what you love.</h2><p>Real finds from Shopify and eBay, shaped around your preferences.</p></div>
+          <div><span>02 / FUND</span><h2>Check what the wallet can cover.</h2><p>Read Solana balances and quote a conversion into USDC when needed.</p></div>
+          <div><span>03 / APPROVE</span><h2>Review exact purchase terms.</h2><p>Approve only a verified merchant total. Conversion and payment stay separate.</p></div>
+          <div><span>04 / COMPLETE</span><h2>Pay, then prove the order.</h2><p>Retail payment and order evidence are prepared in code. Provider access still blocks live completion.</p></div>
+        </section>}
       </section>
       {purchase && <aside className="purchase-review" ref={reviewRef} aria-label="Purchase review" aria-busy={!!busy}>
         <div className="review-header"><p className="eyebrow">YOUR NEXT FIND</p><h2>Cost &amp; funding</h2><span className="badge">Purchase review</span></div>
+        <PurchaseJourneyMap hasSelectedOffer={!!selected} purchase={purchase} rehearsalActive={rehearsalActive} />
         <div className="review-product">{selected && <ProductImage offer={selected} />}<div><small>{purchase.product.merchant ?? purchase.product.source}</small><h3>{purchase.product.title}</h3><p>{purchase.product.variant ?? "Variant not specified"}</p></div></div>
         <div className="price-summary"><span>{checkoutVerified ? "Final merchant checkout total" : checkoutCalculated ? "Merchant-calculated total · can still change" : `Item ${purchase.checkout.itemKind === "catalog" ? "catalog" : purchase.checkout.itemKind === "merchant_checkout" ? "merchant" : "listing"} price`}</span><strong>{checkoutVerified || checkoutCalculated ? purchase.checkout.merchantTotalDisplay : purchase.checkout.itemDisplay ?? "Unknown"}</strong><p>Quantity {purchase.checkout.quantity} · {checkoutVerified ? "current merchant terms" : checkoutCalculated ? "not approvable until the merchant marks checkout ready" : "final total pending"}</p></div>
         <label className="asset-select">Quantity<select aria-label="Product quantity" disabled={!!busy} value={purchase.checkout.quantity}
@@ -484,9 +494,19 @@ export function ShopApp() {
           </> : <p>Funding is temporarily unavailable. Your selected product is preserved.</p>}
         </Block>
         <Block step="3" title="You approve the next step"><div className={`approval-state ${prepared ? "ready" : ""}`}><span className="badge">{prepared ? "Transaction prepared" : expired ? "Refresh required" : "Swap not executed"}</span><h3>{prepared ? "Ready for your approval" : purchase.walletKind === "sample" ? "This is a sample preview" : live && !purchase.funding?.fundable ? "More funding needed." : live ? "Quote ready. Transaction not prepared." : "Your money stays in your wallet."}</h3><p>{prepared ? "A real unsigned transaction has been prepared and its format checked. It would convert the asset amount above into USDC, subject to the quote’s minimum received and slippage." : live && !purchase.funding?.fundable ? "This asset cannot cover the full funding gap while preserving the network reserve." : live ? "A live quote is available. Use a real wallet and refresh to try preparing an unsigned transaction." : "No swap has been signed or broadcast."}</p>{prepared && <strong className="approval-label">AWAITING USER APPROVAL</strong>}<p className="section-copy">Production transaction signing and financial execution are disabled. The separate devnet signing check does not approve or execute a swap.</p></div></Block>
-        <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ ordinary merchant payment</div><span className="badge">Card rail not connected</span><p>No card is issuing or paying. Bridge sandbox access stays blocked. Immersve’s published sandbox keys returned API_KEY_DISABLED, so no sandbox authorization was run. Solana funding stays separate. A sandbox payment would not create a merchant order.</p><div className="end-states"><span>Payment not executed</span><span>Order not created</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
-        <p className="section-copy">Purchase approval becomes available after the final merchant total is verified. A live conversion quote does not mean USDC is ready or a payment has been approved.</p>
-        {selected?.currency === "USD" && selected.priceMinor && BigInt(selected.priceMinor) > 0n && <PaymentRehearsal key={`${selected.id}:${selected.priceMinor}:${purchase.checkout.quantity}`} itemMinor={selected.priceMinor} quantity={purchase.checkout.quantity} title={selected.title} />}
+        <div className="next-rail"><p className="eyebrow">WHAT COMES NEXT</p><h3>From wallet to an ordinary merchant.</h3><div className="rail-path">Solana assets → DFlow → USDC<br />→ ordinary merchant payment → merchant order evidence</div><span className="badge">Card rail not connected</span><p>No card is issuing or paying. Bridge sandbox access stays blocked. Immersve’s published sandbox keys returned API_KEY_DISABLED, so no sandbox authorization was run. Solana funding stays separate. A sandbox payment would not create a merchant order, and this build does not call Shopify complete_checkout.</p><div className="end-states"><span>{purchase.paymentStatus.replaceAll("_", " ")}</span><span>{purchase.orderStatus.replaceAll("_", " ")}</span></div><details><summary>Integration status</summary><p>{purchase.cardRail.message}</p></details></div>
+        <p className="section-copy">Purchase approval becomes available after the final merchant total is verified. A live conversion quote does not mean USDC is ready or a payment has been approved. Opening a merchant link does not pay.</p>
+        {selected?.currency === "USD" && selected.priceMinor && BigInt(selected.priceMinor) > 0n && <PaymentRehearsal
+          key={`${selected.id}:${selected.priceMinor}:${purchase.checkout.quantity}:${purchase.termsId}`}
+          itemMinor={selected.priceMinor}
+          quantity={purchase.checkout.quantity}
+          title={selected.title}
+          termsKey={`${purchase.termsId}:${selected.id}:${purchase.checkout.quantity}`}
+          livePaymentStatus={purchase.paymentStatus}
+          liveOrderStatus={purchase.orderStatus}
+          liveFinalTotal={purchase.finalTotal}
+          onActiveChange={setRehearsalActive}
+        />}
       </aside>}
     </div>
     <footer><span>SuperTab · AI shopping, powered by what you hold.</span><details><summary>Live services & demo status</summary>{health ? <div><p>Assistant: {health.gemini === "configured" ? health.geminiModel : "Not configured"}</p><p>Shopify: {health.shopify} · eBay: {health.ebay}</p><p>Solana: {health.solana} · DFlow: {["live_quote", "available", "authenticated"].includes(health.dflow) ? "Available at last check" : "Temporarily unavailable"}</p><p>CardRail not connected · financial execution disabled</p></div> : <p>Checking live services…</p>}</details></footer>

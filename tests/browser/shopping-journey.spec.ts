@@ -171,6 +171,25 @@ test("merchant handoff does not claim payment or an order", async ({ page }) => 
   await expect(page.getByRole("region", { name: "Merchant checkout total" }).getByText("Order not created.", { exact: true })).toBeVisible();
 });
 
+test("purchase review keeps the full journey and a labeled simulation separate from live payment", async ({ page }) => {
+  await search(page, "Find me a black polo under $50");
+  await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Review purchase" }).click();
+  const journey = page.getByRole("region", { name: "Purchase journey" });
+  await expect(journey).toContainText("AI shopping that uses Solana assets to complete purchases.");
+  await expect(journey).toContainText("Pay the merchant");
+  await expect(journey.getByText("Provider-blocked").first()).toBeVisible();
+  const rehearsal = page.getByRole("region", { name: "Local payment rehearsal" });
+  await expect(rehearsal).toContainText("LOCAL SIMULATION");
+  await expect(rehearsal).toContainText("Live PAYMENT NOT READY");
+  await expect(rehearsal).toContainText("Live ORDER NOT CREATED");
+  await rehearsal.getByRole("button", { name: /Approve simulated/ }).click();
+  await expect(rehearsal).toContainText("Simulated PAYMENT READY");
+  await rehearsal.getByRole("button", { name: "Simulate lost response" }).click();
+  await expect(rehearsal).toContainText("Simulated PAYMENT PENDING");
+  await expect(rehearsal).toContainText("Payment outcome is unknown");
+  await expect(rehearsal).toContainText("Live PAYMENT NOT READY");
+});
+
 test("a narrow viewport can search from the keyboard without horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator("#request").focus();

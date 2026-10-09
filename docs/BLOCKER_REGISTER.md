@@ -1,0 +1,13 @@
+# External blocker register — October 9, 2026
+
+Freeze list. Do not research new providers, contact support, create accounts, or repeatedly probe these endpoints. Reopen only when the named condition is already true.
+
+| Journey step | Missing access or behavior | Evidence / last verified | Code already prepared | Resume when | Prototype can show meanwhile |
+| --- | --- | --- | --- | --- | --- |
+| Final retail checkout total | Shopify `ready_for_complete` for the selected variant/quantity/USD destination is not available for repeatable live use. Earlier True Classic reads needed escalation / did not reconcile. | `docs/CHECKOUT_RESEARCH.md`, `docs/PRODUCT_GAP_AUDIT.md`, 2026-10-03 / 2026-10-08 | `verifyCheckout`, `classifyCreatedCheckout`, checkout review UI | A configured origin returns a current reconciled USD `ready_for_complete` checkout for the selected terms | Catalog/listing planning amount, merchant handoff links, destination pricing form when the origin is allowed |
+| Retail payment | Bridge sandbox key and Stripe Issuing sandbox app are missing. `bridgeAccess` stays `sandbox_blocked`. | `docs/PAYMENT_RAIL_DECISION.md`, 2026-10-08 | `BridgeCardRail`, `assertPaymentCanStart`, `bindCardEventToApproval`, local rehearsal | Owner has a Bridge sandbox key and can authenticate read-only to `api.sandbox.bridge.xyz` | Truthful “card rail not connected”, labeled local payment rehearsal |
+| Retail merchant order | Agent lacks `complete_checkout` / `read_global_api_orders`. Storefront handoff cannot be read back. | `docs/MERCHANT_ORDER_PATH.md`, 2026-10-08 | `merchant-order.ts` binders, `acceptOrderEvidence`, simulated receipt in rehearsal | Shopify grants order-complete access for this agent profile | Order stays `ORDER_NOT_CREATED`; simulated receipt stays labeled; historical devnet order is a separate product |
+| Card issuance / KYB | No Bridge customer endorsement or funded card account | `docs/PAYMENT_RAIL_DECISION.md` | Provider-neutral card rail interface | After sandbox auth succeeds and owner authorizes the next step | Not demonstrated as live |
+| SCVD sponsor / certificate | Sponsor rotated; retained payment mismatch; no verified settlement or certificate | `docs/PROJECT_STATE.md`, 2026-10-06 | Digital purchase workflow, gate-off execute route | Owner authorizes a fresh review with the current sponsor; execution gate remains owner-controlled | Disabled prepare/sign/submit controls; historical notes only |
+
+Financial execution stays off (`SUPERTAB_MAINNET_EXECUTION` unset). No production signing, broadcast, swap, card spend, merchant payment, or refund is authorized by this register.
