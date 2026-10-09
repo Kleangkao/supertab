@@ -48,7 +48,7 @@ Owner checkpoint: provide uninterrupted device-testing availability. When ordina
 - Deterministic Playwright: 15 passed. These are browser fixtures, not Seeker evidence.
 - Android release assemble: passed with existing signing key.
 - Android unit tests freshly rerun with `--rerun-tasks`: 5 passed.
-- Gradle wallet-bundle guard: valid bundle accepted.
+- Gradle wallet-bundle guard: valid bundle accepted; known placeholder rejected in a controlled negative check, then original asset bytes restored.
 - Production dependency audit: zero advisories; build-only MWA dependency brings React Native tooling transitive advisories (17 high in full audit). No `npm audit fix --force` or broad dependency replacement performed.
 
 ## Evidence and safety
