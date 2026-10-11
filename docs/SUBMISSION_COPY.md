@@ -1,6 +1,8 @@
 # SuperTab submission copy
 
-Draft for review. Keep the personal wording, and confirm the contributor field before submitting. Submission opens October 6 at 6 PM Bangkok; the official hackathon page lists October 12 as the due date. No form has been submitted.
+This file is an earlier draft. Do not paste it into the form. The current form text is `submission/FINAL_SUBMISSION_TEXT.md`, checked against the live desk on 11 October 2026. Claims below about a confirmed mainnet conversion, a private repository, or an October 12 due date are historical and are not the current submission.
+
+Draft for review. Keep the personal wording, and confirm the contributor field before submitting. No form has been submitted.
 
 ## Brief description
 
@@ -57,7 +59,7 @@ For local review, use Node.js 20.19+ and follow README.md. Run npm ci, then npm 
 
 ## Links and media still needed
 
-GitHub: https://github.com/Kleangkao/supertab — verify judge access if private.
+GitHub: https://github.com/Kleangkao/supertab — public as of 11 October 2026. Do not change visibility.
 Project website/live product: https://supertab-main.vercel.app
 Demo video: YouTube, Loom, or Vimeo, up to 3 minutes showing the live product.
 Pitch video: separate video up to 2 minutes introducing you, the product, and why you are building it.

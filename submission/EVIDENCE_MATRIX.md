@@ -1,5 +1,18 @@
 # Evidence matrix
 
+The 8 October 2026 table below is the record from that day. It is not the current release. On 11 October 2026 the installed repaired APK and production commit `f62491159cec2e17c25163a31fa57f8c22d02a49` were retested on the same physical Seeker class (Android 16). The current checklist is `docs/CLOCK_IN_RELEASE_2026-10-11.md`.
+
+Current corrections:
+
+- The submission APK is SHA-256 `0533ea859c8ff4fccde60e518bdce39b69858a6bab53b560f8517e8ec8d6a1c1`, and that hash matches the installed app.
+- The GitHub repository is public.
+- A connected read-only balance was later verified: 0 SOL and 0 USDC, plus another token with no invented valuation. The 8 October “wallet could not load” row stays historical.
+- Returning from Home clears that funding review and keeps the shopping context.
+- A Seeker demo file now exists locally. It is not a public link.
+- Retail payment and merchant order completion remain provider-blocked.
+
+## 8 October 2026 record
+
 Checked on 8 October 2026. The Seeker was a physical device running Android 16. No payment was approved.
 
 | Capability | Status | Evidence |
