@@ -6,7 +6,8 @@ Asia/Bangkok. The authenticated form was not submitted. Financial execution stay
 
 | Item | Value |
 | --- | --- |
-| Commit | `f62491159cec2e17c25163a31fa57f8c22d02a49` — Clear stale wallet funding when the Android shell returns. |
+| Client commit | `f62491159cec2e17c25163a31fa57f8c22d02a49` — Clear stale wallet funding when the Android shell returns. |
+| Package commit | `cca2215` records this checklist and the corrected judge copy. It does not change the app. A later documentation commit may move the production tip; the client behavior stays the `f624911` build. |
 | Files in that commit | `src/components/shop-app.tsx`, `tests/browser/shopping-journey.spec.ts` |
 | Branch published | `main`, fast-forward from `41e7885` |
 | GitHub production deployment | `6993146946`, created 15:42 Asia/Bangkok, environment Production |
