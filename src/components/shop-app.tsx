@@ -67,6 +67,8 @@ export function ShopApp() {
   const androidShell = useSyncExternalStore(subscribeNothing, androidShellSnapshot, androidShellServer);
   const offline = !useSyncExternalStore(subscribeOnline, onlineSnapshot, onlineServer);
   const lock = useRef(false);
+  const connectingWallet = useRef(false);
+  const pendingReturn = useRef(false);
   const walletEpoch = useRef(0);
   const walletOff = useRef<(() => void) | null>(null);
   const activeWallet = useRef<StandardWallet | null>(null);
@@ -181,7 +183,7 @@ export function ShopApp() {
     } catch (caught) {
       if (epoch !== walletEpoch.current) return;
       setError(caught instanceof Error && caught.name !== "TimeoutError" ? caught.message : "This is taking too long. Your selection is still here; please try again.");
-    } finally { lock.current = false; setBusy(null); flushWalletReset(); }
+    } finally { lock.current = false; setBusy(null); flushReturnedWalletReview(); flushWalletReset(); }
   }
 
   function flushWalletReset() {
@@ -191,7 +193,7 @@ export function ShopApp() {
     void request("/api/purchase", { ...reset, walletMode: "none" }, "Clearing the previous wallet’s funding plan…");
   }
 
-  function invalidateWallet() {
+  function invalidateWallet(message = "Your wallet accounts or network changed. Reconnect to review a fresh funding plan. Your search is still here.", asNote = false) {
     walletOff.current?.(); walletOff.current = null;
     activeWallet.current = null; activeAccount.current = null; setWalletChallenge(null); setCanSignMessage(false); setDevnetCheck(null); setCanSignDevnet(false); setWalletSigned(false); walletDesk.current = null;
     walletEpoch.current++;
@@ -202,9 +204,40 @@ export function ShopApp() {
       setSession(latestSession.current);
       if (current.selectedOfferId) pendingWalletReset.current = { sessionId: current.sessionId, offerId: current.selectedOfferId, quantity: current.purchase?.checkout.quantity ?? 1 };
     }
-    setError("Your wallet accounts or network changed. Reconnect to review a fresh funding plan. Your search is still here.");
+    if (asNote) setNote(message);
+    else setError(message);
     flushWalletReset();
   }
+
+  function flushReturnedWalletReview() {
+    if (!pendingReturn.current || lock.current || connectingWallet.current) return;
+    pendingReturn.current = false;
+    const purchase = latestSession.current?.purchase;
+    if (!purchase || (purchase.walletKind !== "connected" && purchase.walletKind !== "read_only")) return;
+    invalidateWallet("Welcome back. Reconnect or enter a public address to refresh balances and funding. Your search, selection and shortlist are still here.", true);
+  }
+
+  useEffect(() => {
+    function onReturn() {
+      // MWA backgrounds the shell during authorization. Let that active request
+      // finish; invalidating its account here would discard a genuine connection.
+      if (connectingWallet.current) return;
+      pendingReturn.current = true;
+      // A shopping response must land before its wallet review is reset. The
+      // shared epoch also protects shopping responses from stale wallet writes.
+      flushReturnedWalletReview();
+    }
+    function onVisible() { if (document.visibilityState === "visible") onReturn(); }
+    function onPageShow(event: PageTransitionEvent) { if (event.persisted) onReturn(); }
+    window.addEventListener("supertab-shell-resume", onReturn);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("supertab-shell-resume", onReturn);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  });
 
   async function submitShopping(message: string, clearDraft: boolean) {
     const body = await request("/api/shop", { sessionId: session?.sessionId, message }, "Finding real products for you…");
@@ -239,7 +272,7 @@ export function ShopApp() {
     const wallet = chosen ?? wallets[0];
     if (!wallet) { setError(isAndroidShell(window.navigator.userAgent) ? walletFailureMessage("unavailable") : "No Solana wallet extension was found in this browser. Open SuperTab in the browser where your wallet is installed, then connect. Connecting requests no message or transaction signature."); return; }
     setWalletChoices([]);
-    lock.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
+    lock.current = true; connectingWallet.current = true; setBusy(`Connecting ${wallet.name}…`); setError(null);
     try {
       const connected = await connectStandardWallet(wallet);
       walletDesk.current = null; setWalletSigned(false);
@@ -258,7 +291,7 @@ export function ShopApp() {
         setWalletMode("connected");
       }
     } catch (caught) { setError(walletFailureMessage(classifyWalletFailure(caught))); }
-    finally { lock.current = false; setBusy(null); flushWalletReset(); }
+    finally { connectingWallet.current = false; lock.current = false; setBusy(null); flushWalletReset(); }
   }
 
   async function checkWalletControl(sign = false) {
@@ -456,7 +489,7 @@ export function ShopApp() {
           {showAddressInput && <form className="address-form" onSubmit={event => { event.preventDefault(); void selectOffer(session!.selectedOfferId!, "address", address.trim(), null); }}><label className="sr-only" htmlFor="wallet-address">Public Solana address</label><input id="wallet-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Public Solana address" disabled={!!busy} required /><button className="primary" disabled={!!busy || !address.trim()}>Look up</button></form>}
           <div className={`wallet-state ${purchase.walletKind === "sample" ? "sample" : ""}`}><span className="badge">{walletLabel(purchase)}</span>{purchase.walletAddress && <span className="mono" title={purchase.walletAddress}>{maskAddress(purchase.walletAddress)}</span>}</div>
           {walletChoices.length > 0 && <div className="wallet-options" aria-label="Choose a wallet">{walletChoices.map((wallet, index) => <button key={index} disabled={!!busy} onClick={() => void connectWallet(wallet)}>Connect {wallet.name}</button>)}<button onClick={() => setWalletChoices([])}>Cancel</button></div>}
-          {purchase.walletKind !== "none" && <button className="secondary" disabled={!!busy} onClick={invalidateWallet}>Clear wallet review</button>}
+          {purchase.walletKind !== "none" && <button className="secondary" disabled={!!busy} onClick={() => invalidateWallet()}>Clear wallet review</button>}
           {purchase.walletKind === "connected" && <div className="wallet-control">
             {purchase.walletControl && now < Date.parse(purchase.walletControl.expiresAt)
               ? <p className="section-copy">Wallet control verified with a message signature. Swap and purchase approval are still separate.</p>

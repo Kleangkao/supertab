@@ -237,3 +237,90 @@ test("a second tab sees shortlist changes from the first tab", async ({ page, co
   await expect(other.getByRole("region", { name: "Shortlist" })).toHaveCount(0, { timeout: 5_000 });
   await other.close();
 });
+
+async function mockReadOnlyBalances(page: Page) {
+  await page.route("**/api/purchase", async route => {
+    const input = route.request().postDataJSON();
+    if (input.walletMode !== "address" && input.walletMode !== "connected") return route.continue();
+    const response = await route.fetch({ postData: JSON.stringify({ ...input, walletMode: "sample", address: "" }) });
+    const body = await response.json();
+    body.purchase.walletMode = input.walletMode;
+    body.purchase.walletKind = input.walletMode === "connected" ? "connected" : "read_only";
+    body.purchase.walletAddress = input.address;
+    body.purchase.balanceSource = "chain";
+    await route.fulfill({ response, json: body });
+  });
+}
+
+test("shell background and return clear stale funding while preserving shopping", async ({ page }) => {
+  await search(page, "Find me a black polo under $50");
+  await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Save to shortlist" }).click();
+  await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Review purchase" }).click();
+  await page.getByText("Explore without connecting").click();
+  await mockReadOnlyBalances(page);
+  await page.getByRole("button", { name: "Demo wallet · read-only" }).click();
+  await expect(page.locator(".assets")).toBeVisible();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("supertab-shell-hide"));
+    window.dispatchEvent(new Event("supertab-shell-resume"));
+  });
+  await expect(page.locator(".assets")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Welcome back. Reconnect or enter a public address" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cost & funding" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Shortlist" })).toContainText("Black Torrey Polo");
+});
+
+test("a pending connection survives wallet return without requesting a signature", async ({ page }) => {
+  await page.addInitScript(() => {
+    const account = { address: "JCVsKd4TMg1fvEs7rjf5YgLYbJfNC8Dwb4x1PchFkGM7", chains: ["solana:mainnet"], features: [] };
+    const wallet = { name: "Read-only test wallet", accounts: [], features: {
+      "standard:connect": { connect: () => new Promise(resolve => {
+        window.addEventListener("test-wallet-approved", () => resolve({ accounts: [account] }), { once: true });
+      }) },
+    } };
+    window.addEventListener("wallet-standard:app-ready", event => {
+      (event as CustomEvent).detail.register(wallet);
+    });
+  });
+  await page.reload();
+  await search(page, "Find me a black polo under $50");
+  await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Review purchase" }).click();
+  await page.getByText("Explore without connecting").click();
+  await mockReadOnlyBalances(page);
+  await page.getByRole("button", { name: "Demo wallet · read-only" }).click();
+  await expect(page.locator(".assets")).toBeVisible();
+  const signatures: string[] = [];
+  page.on("request", request => { if (/\/api\/wallet\/(control|devnet)/.test(request.url())) signatures.push(request.url()); });
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Connecting Read-only test wallet…" })).toBeVisible();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("supertab-shell-resume"));
+    window.dispatchEvent(new Event("test-wallet-approved"));
+  });
+  await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeEnabled();
+  await expect(page.locator(".wallet-state")).toContainText("Connected wallet");
+  await expect(page.locator(".assets")).toBeVisible();
+  expect(signatures).toEqual([]);
+});
+
+test("return during a shopping request preserves the accepted refinement", async ({ page }) => {
+  await search(page, "Find me a black polo under $50");
+  await exactCard(page, "Black Torrey Polo").getByRole("button", { name: "Review purchase" }).click();
+  await page.getByText("Explore without connecting").click();
+  await mockReadOnlyBalances(page);
+  await page.getByRole("button", { name: "Demo wallet · read-only" }).click();
+  await expect(page.locator(".assets")).toBeVisible();
+  let finishSearch: (() => void) | undefined;
+  await page.route("**/api/shop", async route => {
+    await new Promise<void>(resolve => { finishSearch = resolve; });
+    await route.continue();
+  });
+  await page.locator("#request").fill("Find me black running shoes");
+  await page.getByRole("button", { name: "Find it" }).click();
+  await expect.poll(() => typeof finishSearch).toBe("function");
+  await page.evaluate(() => window.dispatchEvent(new Event("supertab-shell-resume")));
+  finishSearch!();
+  await expect(exactCard(page, "Black running shoes")).toBeVisible();
+  await expect(page.locator("#request")).toHaveValue("");
+  await expect(page.locator(".assets")).toHaveCount(0);
+});
